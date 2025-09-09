@@ -33,7 +33,12 @@ class OpenAIService:
             'urgente', 'emergencia', 'inmediato', 'hoy mismo', 'crítico',
             'crisis', 'problema grave', 'accidente', 'suspensión', 'expulsión',
             'ayuda', 'socorro', 'grave', 'hospital', 'ambulancia', 'lesion',
-            'lesionado', 'herido', 'caída', 'golpe', 'sangre', 'desmayo'
+            'lesionado', 'herido', 'caída', 'golpe', 'sangre', 'desmayo',
+            'hospitalizado', 'hospitalizada', 'internado', 'internada',
+            'sistema caído', 'sistema académico caído', 'plataforma caída',
+            'servidor caído', 'no funciona', 'error crítico', 'falla masiva',
+            'estudiante en crisis', 'crisis estudiantil', 'situación crítica',
+            'violencia', 'amenaza', 'peligro', 'riesgo', 'evacuación'
         ]
         
         self.high_priority_keywords = [
@@ -73,15 +78,17 @@ CONTEXTO ACADÉMICO:
 - Fecha actual: {current_date}
 
 NIVELES DE URGENCIA:
-1. URGENTE (próxima 1 hora): Emergencias médicas, accidentes estudiantiles, crisis de seguridad, situaciones que requieren acción INMEDIATA
+1. URGENTE (próxima 1 hora): Emergencias médicas/estudiantiles, accidentes, crisis de seguridad, sistemas académicos caídos, situaciones que requieren acción INMEDIATA
 2. ALTA (próximas 3 horas): Problemas académicos graves, reuniones urgentes hoy, deadlines críticos, estudiantes en crisis
 3. MEDIA (hoy): Consultas generales, coordinación con profesores, tareas administrativas regulares
 4. BAJA (mañana o más): Información general, invitaciones futuras, documentación no urgente
 
 PALABRAS CLAVE CRÍTICAS para URGENTE:
-- Emergencias: accidente, lesión, hospital, ambulancia, herido, sangre, desmayo, caída
-- Crisis: ayuda, socorro, crítico, grave, urgente, emergencia
-- Seguridad: peligro, amenaza, violencia, drogas, alcohol
+- Emergencias médicas: accidente, lesión, hospital, ambulancia, herido, sangre, desmayo, caída, hospitalizado, internado
+- Crisis estudiantiles: estudiante en crisis, crisis estudiantil, situación crítica, ayuda urgente
+- Sistemas críticos: sistema caído, sistema académico caído, plataforma caída, servidor caído, error crítico, falla masiva
+- Seguridad: peligro, amenaza, violencia, evacuación, riesgo grave
+- Palabras de urgencia: crítico, grave, urgente, emergencia, inmediato, socorro
 
 CORREO A CLASIFICAR:
 Remitente: {email_data.get('sender_name', '')} <{email_data.get('sender_email', '')}>
