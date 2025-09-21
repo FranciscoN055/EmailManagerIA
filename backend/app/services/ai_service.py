@@ -15,6 +15,7 @@ class AIService:
     def __init__(self):
         self.openai_service = None
         self.gemini_service = None
+        self.model = "hybrid"  # Add model attribute
         self._initialize_services()
     
     def _initialize_services(self):
@@ -82,6 +83,8 @@ class AIService:
         logger.warning("All AI services failed, using rule-based classification")
         if self.openai_service:
             return self.openai_service._fallback_classification(email_data)
+        elif self.gemini_service:
+            return self.gemini_service._fallback_classification(email_data)
         else:
             # Basic fallback if no service available
             return {

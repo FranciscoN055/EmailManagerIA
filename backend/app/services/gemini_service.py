@@ -26,10 +26,12 @@ class GeminiService:
                 # Configure Gemini
                 genai.configure(api_key=self.api_key)
                 self.client = genai.GenerativeModel(self.model_name)
-                logger.info("Gemini client initialized successfully")
+                logger.info("✅ Gemini client initialized successfully")
             except Exception as e:
-                logger.warning(f"Failed to initialize Gemini client: {e}")
+                logger.warning(f"❌ Failed to initialize Gemini client: {e}")
                 self.client = None
+        else:
+            logger.warning("⚠️ Gemini API key not configured")
         
         # Academic context patterns - REAL urgent situations
         self.urgent_keywords = [
