@@ -28,10 +28,7 @@ class OpenAIService:
         if self.api_key and self.api_key != 'your-openai-api-key-here':
             try:
                 # Initialize OpenAI client with minimal configuration
-                self.client = OpenAI(
-                    api_key=self.api_key,
-                    timeout=30.0
-                )
+                self.client = OpenAI(api_key=self.api_key)
                 logger.info("OpenAI client initialized successfully")
             except Exception as e:
                 logger.warning(f"Failed to initialize OpenAI client: {e}")
