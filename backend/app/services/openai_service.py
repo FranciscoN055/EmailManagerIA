@@ -31,9 +31,22 @@ class OpenAIService:
                 import openai
                 logger.info(f"OpenAI version: {openai.__version__}")
                 
-                # Create client with only essential parameters
+                # Create client with only essential parameters - no proxies or other problematic params
                 self.client = OpenAI(api_key=self.api_key)
                 logger.info("OpenAI client initialized successfully")
+            except TypeError as e:
+                if "proxies" in str(e):
+                    logger.warning("OpenAI proxies error detected - trying alternative initialization")
+                    try:
+                        # Try with minimal parameters only
+                        self.client = OpenAI(api_key=self.api_key)
+                        logger.info("OpenAI client initialized successfully (alternative method)")
+                    except Exception as e2:
+                        logger.warning(f"Alternative OpenAI initialization failed: {e2}")
+                        self.client = None
+                else:
+                    logger.warning(f"OpenAI TypeError: {e}")
+                    self.client = None
             except Exception as e:
                 logger.warning(f"Failed to initialize OpenAI client: {e}")
                 logger.warning(f"Error type: {type(e).__name__}")
