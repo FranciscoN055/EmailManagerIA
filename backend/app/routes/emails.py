@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.services.microsoft_graph import MicrosoftGraphService
-from app.services.openai_service import OpenAIService
+from app.services.ai_service import AIService
 from app.services.email_processor import EmailProcessor
 from app.models.user import User
 from app.models.email import Email
@@ -181,11 +181,11 @@ def sync_emails():
         classification_results = {}
         if classify_immediately and new_emails:
             try:
-                openai_service = OpenAIService()
+                ai_service = AIService()
                 logger.info(f"Starting AI classification of {len(new_emails)} new emails")
                 
                 # Classify in batches
-                classifications = openai_service.classify_batch(new_emails, batch_size=3)
+                classifications = ai_service.classify_batch(new_emails, batch_size=3)
                 
                 # Update emails with classification results
                 for i, email_data in enumerate(new_emails):
@@ -1080,7 +1080,7 @@ def classify_emails():
 def get_ai_status():
     """Get AI service status and configuration."""
     try:
-        from app.services.openai_service import OpenAIService
+        from app.services.ai_service import AIService
         
         openai_service = OpenAIService()
         status = openai_service.get_status()
@@ -1289,7 +1289,7 @@ def get_openai_status():
 def check_openai_rate_limit():
     """Check OpenAI rate limit status."""
     try:
-        from app.services.openai_service import OpenAIService
+        from app.services.ai_service import AIService
         
         openai_service = OpenAIService()
         status = openai_service.get_status()
