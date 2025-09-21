@@ -1,3 +1,4 @@
+# Production requirements for Railway deployment
 Flask==2.3.3
 Flask-SQLAlchemy==3.0.5
 Flask-Migrate==4.0.5
@@ -7,7 +8,5 @@ python-dotenv==1.0.0
 requests==2.31.0
 msal==1.24.1
 openai==1.54.4
-psycopg2-binary==2.9.10
+psycopg2-binary==2.9.7
 gunicorn==21.2.0
-email-validator==2.1.0
-Werkzeug==3.1.3

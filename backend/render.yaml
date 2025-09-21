@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: email-manager-backend
+    env: python
+    plan: free
+    pythonVersion: "3.11"
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python run.py"
+    healthCheckPath: "/api/health"
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        value: postgresql://email_manager_user:GQWBUD04ZlWyKuisF269nmIS98YtpVnz@dpg-d33fpd3uibrs73ajf8ug-a.oregon-postgres.render.com/email_manager
+      - key: MICROSOFT_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_TENANT_ID
+        sync: false
+      - key: MICROSOFT_REDIRECT_URI
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+
+  - type: pserv
+    name: email-manager-db
+    env: postgresql
+    plan: free

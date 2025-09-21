@@ -27,19 +27,40 @@ import {
   Refresh,
 } from '@mui/icons-material';
 import EmailColumn from '../components/email/EmailColumn';
+import ReplyModal from '../components/email/ReplyModal';
 import ThemeToggle from '../components/common/ThemeToggle';
 import PriorityProgressBar from '../components/common/PriorityProgressBar';
 import { generateMockEmails, getEmailsByUrgency, getEmailStats } from '../utils/mockData';
 import { emailAPI } from '../services/api';
 
+function getInitials(name, email) {
+  if (name) {
+    const parts = name.trim().split(' ');
+    if (parts.length === 1) return parts[0][0].toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+  if (email) {
+    const user = email.split('@')[0];
+    return user.slice(0, 2).toUpperCase();
+  }
+  return '';
+}
+
 const Dashboard = () => {
   const [emails, setEmails] = useState([]);
+  const [sentEmails, setSentEmails] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterBy, setFilterBy] = useState('all');
   const [notificationAnchor, setNotificationAnchor] = useState(null);
   const [profileAnchor, setProfileAnchor] = useState(null);
   const [stats, setStats] = useState({});
   const [isLoading, setIsLoading] = useState(false);
+  const [replyModalOpen, setReplyModalOpen] = useState(false);
+  const [selectedEmail, setSelectedEmail] = useState(null);
+  const [isSendingReply, setIsSendingReply] = useState(false);
+  const [profilePhotoUrl, setProfilePhotoUrl] = useState(null);
+  const [userName, setUserName] = useState('');
+  const [userEmail, setUserEmail] = useState('');
 
   const columns = [
     { id: 'urgent', urgency: 'urgent', title: 'Urgente', subtitle: 'Próxima hora' },
@@ -51,6 +72,55 @@ const Dashboard = () => {
 
   useEffect(() => {
     loadEmails();
+    
+    // Set up polling for full synchronization every 2 minutes
+    const syncInterval = setInterval(async () => {
+      try {
+        console.log('Auto-syncing emails and statuses...');
+        await loadEmails();
+        console.log('Auto-sync completed');
+      } catch (error) {
+        console.error('Auto-sync failed:', error);
+      }
+    }, 2 * 60 * 1000); // Every 2 minutes
+
+    return () => clearInterval(syncInterval);
+  }, []);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    fetch('http://localhost:5000/api/microsoft/profile', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          setUserName(data.name);
+          setUserEmail(data.email);
+
+          // Si hay foto, la pedimos
+          if (data.has_photo) {
+            fetch('http://localhost:5000/api/microsoft/profile/photo', {
+              headers: { Authorization: `Bearer ${token}` },
+            })
+              .then(response => {
+                if (response.ok) return response.blob();
+                throw new Error('No photo');
+              })
+              .then(blob => {
+                const objectUrl = URL.createObjectURL(blob);
+                setProfilePhotoUrl(objectUrl);
+              })
+              .catch(() => setProfilePhotoUrl(null));
+          } else {
+            setProfilePhotoUrl(null);
+          }
+        }
+      });
   }, []);
 
   useEffect(() => {
@@ -72,12 +142,46 @@ const Dashboard = () => {
       // First, sync emails from Microsoft Graph
       console.log('Syncing emails from Microsoft Graph...');
       const syncResponse = await emailAPI.syncEmails({ count: 50, classify: true });
-      console.log('Sync completed:', syncResponse.data);
-      
-      // Then, get all emails
+      console.log('Email sync completed:', syncResponse.data);
+
+      // Also sync email read/unread statuses
+      console.log('Syncing email statuses...');
+      const statusResponse = await emailAPI.syncEmailStatuses({ limit: 100 });
+      console.log('Status sync completed:', statusResponse.data);
+
+      // Auto-classify pending emails
+      console.log('Checking for pending emails to classify...');
+      try {
+        const classifyResponse = await emailAPI.autoClassifyEmails();
+        console.log('Auto-classification completed:', classifyResponse.data);
+        if (classifyResponse.data.classified > 0) {
+          console.log(`✅ Auto-classified ${classifyResponse.data.classified} emails`);
+        } else {
+          console.log('ℹ️  No pending emails to classify');
+        }
+      } catch (classifyError) {
+        console.warn('Auto-classification failed:', classifyError);
+        // Continue without failing the entire load process
+      }
+
+      // Retry classification for any emails that hit rate limit (production only)
+      try {
+        const retryResponse = await emailAPI.retryClassification();
+        if (retryResponse.data.classified > 0) {
+          console.log(`🔄 Retry classified ${retryResponse.data.classified} emails`);
+        }
+      } catch (retryError) {
+        console.log('No emails need retry classification');
+      }
+
+      // Load received emails
       console.log('Fetching emails...');
       const response = await emailAPI.getEmails();
-      
+
+      // Load sent emails for processed column
+      console.log('Fetching sent emails...');
+      const sentResponse = await emailAPI.getSentEmails({ per_page: 50 });
+
       if (response.data && response.data.emails) {
         const apiEmails = response.data.emails.map(email => ({
           id: email.id,
@@ -85,18 +189,44 @@ const Dashboard = () => {
           sender: email.sender,
           preview: email.body_preview,
           urgency: email.urgency_category,
+          urgency_category: email.urgency_category, // Asegurar que ambos estén sincronizados
           priority: email.priority_level,
           isRead: email.is_read,
           receivedAt: email.received_at,
           hasAttachments: email.has_attachments,
-          confidence: email.confidence_score || 0,
-          aiReason: email.ai_classification_reason || ''
+          ai_confidence: email.ai_confidence || 0,
+          aiReason: email.ai_classification_reason || '',
+          emailType: 'received'
         }));
         setEmails(apiEmails);
         console.log(`Successfully loaded ${apiEmails.length} real emails`);
       } else {
         console.warn('No emails returned from API, using mock data');
         setEmails(generateMockEmails());
+      }
+
+      // Process sent emails for the "Procesados" column
+      if (sentResponse.data && sentResponse.data.emails) {
+        const apiSentEmails = sentResponse.data.emails.map(email => ({
+          id: `sent_${email.id}`,
+          subject: email.subject,
+          sender: email.recipient, // For sent emails, show recipient as "sender"
+          preview: email.preview,
+          urgency: 'processed',
+          priority: 5,
+          isRead: true, // Sent emails are always "read"
+          receivedAt: email.sent_at,
+          hasAttachments: email.has_attachments,
+          ai_confidence: 1.0,
+          aiReason: email.email_type === 'reply' ? 'Respuesta enviada' : 'Correo enviado',
+          emailType: email.email_type, // 'sent' or 'reply'
+          isReply: email.is_reply || false
+        }));
+        setSentEmails(apiSentEmails);
+        console.log(`Successfully loaded ${apiSentEmails.length} sent emails`);
+      } else {
+        console.warn('No sent emails returned from API');
+        setSentEmails([]);
       }
     } catch (error) {
       console.error('Failed to load emails:', error);
@@ -108,17 +238,47 @@ const Dashboard = () => {
       }
       console.log('Using mock data as fallback');
       setEmails(generateMockEmails());
+      setSentEmails([]);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleMarkAsRead = (emailId) => {
-    setEmails(prevEmails =>
-      prevEmails.map(email =>
-        email.id === emailId ? { ...email, isRead: true } : email
-      )
-    );
+  const handleMarkAsRead = async (emailId) => {
+    try {
+      // Optimistic update - update UI immediately
+      setEmails(prevEmails =>
+        prevEmails.map(email =>
+          email.id === emailId ? { ...email, isRead: true } : email
+        )
+      );
+
+      // Call backend to mark as read in both database and Microsoft
+      const response = await emailAPI.markEmailAsRead(emailId);
+      
+      if (!response.data.success) {
+        // Revert optimistic update on failure
+        setEmails(prevEmails =>
+          prevEmails.map(email =>
+            email.id === emailId ? { ...email, isRead: false } : email
+          )
+        );
+        console.error('Failed to mark email as read:', response.data.error);
+      } else {
+        console.log('Email marked as read:', {
+          microsoft_updated: response.data.microsoft_updated,
+          local_updated: response.data.local_updated
+        });
+      }
+    } catch (error) {
+      // Revert optimistic update on error
+      setEmails(prevEmails =>
+        prevEmails.map(email =>
+          email.id === emailId ? { ...email, isRead: false } : email
+        )
+      );
+      console.error('Error marking email as read:', error);
+    }
   };
 
   const handleArchive = (emailId) => {
@@ -137,6 +297,47 @@ const Dashboard = () => {
     );
   };
 
+  const handleReply = (email) => {
+    setSelectedEmail(email);
+    setReplyModalOpen(true);
+  };
+
+  const handleSendReply = async (emailId, replyBody) => {
+    setIsSendingReply(true);
+    try {
+      const response = await emailAPI.replyToEmail(emailId, { body: replyBody });
+
+      if (response.data.success) {
+        // Remover el email original de la lista (no moverlo a procesados)
+        // Solo la respuesta enviada aparecerá en procesados cuando se actualice
+        setEmails(prevEmails =>
+          prevEmails.filter(email => email.id !== emailId)
+        );
+
+        // Actualizar estadísticas - solo decrementar del original, procesados se actualizará al cargar sent emails
+        setStats(prevStats => ({
+          ...prevStats,
+          unread: Math.max(0, (prevStats.unread || 0) - 1),
+          byUrgency: {
+            ...prevStats.byUrgency,
+            [selectedEmail?.urgency]: Math.max(0, (prevStats.byUrgency?.[selectedEmail?.urgency] || 0) - 1)
+          }
+        }));
+      }
+    } catch (error) {
+      console.error('Error sending reply:', error);
+      throw new Error(error.response?.data?.error || 'Error al enviar la respuesta');
+    } finally {
+      setIsSendingReply(false);
+    }
+  };
+
+
+  const handleCloseReplyModal = () => {
+    setReplyModalOpen(false);
+    setSelectedEmail(null);
+  };
+
   const filteredEmails = emails.filter(email => {
     const matchesSearch = email.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          email.sender.toLowerCase().includes(searchTerm.toLowerCase());
@@ -146,6 +347,64 @@ const Dashboard = () => {
     if (filterBy === 'starred') return matchesSearch && email.isStarred;
     return matchesSearch;
   });
+
+  const handleEmailDrop = async (emailId, newUrgency) => {
+    // Actualizar UI inmediatamente
+    setEmails(prevEmails =>
+      prevEmails.map(email =>
+        email.id === emailId
+          ? { ...email, urgency: newUrgency, urgency_category: newUrgency }
+          : email
+      )
+    );
+    
+    try {
+      const token = localStorage.getItem('token'); // Usar 'token' en lugar de 'access_token'
+      const response = await fetch(`http://localhost:5000/api/emails/${emailId}/update-urgency`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ urgency_category: newUrgency }),
+      });
+      
+      const result = await response.json();
+      
+      if (!result.success) {
+        console.error('Error del servidor:', result.error);
+        // Revertir el cambio visual si falla
+        setEmails(prevEmails =>
+          prevEmails.map(email =>
+            email.id === emailId
+              ? { ...email, urgency: result.original_urgency || 'medium', urgency_category: result.original_urgency || 'medium' }
+              : email
+          )
+        );
+        alert('Error al actualizar la prioridad del correo');
+      } else {
+        console.log('✅ Prioridad actualizada correctamente');
+      }
+    } catch (error) {
+      console.error('Error actualizando prioridad:', error);
+      // Revertir el cambio visual si falla
+      setEmails(prevEmails =>
+        prevEmails.map(email =>
+          email.id === emailId
+            ? { ...email, urgency: 'medium', urgency_category: 'medium' }
+            : email
+        )
+      );
+      alert('Error de conexión al actualizar la prioridad');
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token'); // Borra el token JWT
+    localStorage.removeItem('refresh_token');
+    localStorage.removeItem('user');
+    window.location.href = '/';  // Redirige al login
+  };
 
   return (
     <Box sx={{ flexGrow: 1, height: '100vh', backgroundColor: 'background.default' }}>
@@ -233,7 +492,12 @@ const Dashboard = () => {
 
           {/* Acciones del header */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <IconButton color="inherit" onClick={loadEmails} disabled={isLoading}>
+            <IconButton 
+              color="inherit" 
+              onClick={loadEmails} 
+              disabled={isLoading}
+              title="Sincronizar correos y estados de lectura"
+            >
               <Refresh sx={{ 
                 animation: isLoading ? 'spin 1s linear infinite' : 'none',
                 '@keyframes spin': {
@@ -258,8 +522,10 @@ const Dashboard = () => {
               color="inherit"
               onClick={(e) => setProfileAnchor(e.currentTarget)}
             >
-              <Avatar sx={{ width: 32, height: 32, fontSize: '0.875rem', bgcolor: 'secondary.main' }}>
-                MS
+              <Avatar src={profilePhotoUrl || undefined}
+                sx={{ width: 32, height: 32, fontSize: '0.875rem', bgcolor: 'secondary.main' }}
+              >       
+                  {!profilePhotoUrl && getInitials(userName, userEmail)}
               </Avatar>
             </IconButton>
           </Box>
@@ -418,7 +684,15 @@ const Dashboard = () => {
           }}
         >
           {columns.map(column => {
-            const columnEmails = getEmailsByUrgency(filteredEmails, column.urgency);
+            let columnEmails;
+            if (column.urgency === 'processed') {
+              // For processed column, show both processed emails and sent emails
+              const processedEmails = getEmailsByUrgency(filteredEmails, 'processed');
+              columnEmails = [...processedEmails, ...sentEmails];
+            } else {
+              columnEmails = getEmailsByUrgency(filteredEmails, column.urgency);
+            }
+
             return (
               <EmailColumn
                 key={column.id}
@@ -427,6 +701,8 @@ const Dashboard = () => {
                 onMarkAsRead={handleMarkAsRead}
                 onArchive={handleArchive}
                 onToggleStar={handleToggleStar}
+                onReply={handleReply}
+                onEmailDrop={handleEmailDrop}
               />
             );
           })}
@@ -470,11 +746,24 @@ const Dashboard = () => {
           <MenuItemComponent onClick={() => setProfileAnchor(null)}>
             ⚙️ Configuración
           </MenuItemComponent>
-          <MenuItemComponent onClick={() => setProfileAnchor(null)}>
+          <MenuItemComponent onClick={() => {
+              handleLogout();
+              setProfileAnchor(null); 
+            }}
+          >
             🚪 Cerrar sesión
           </MenuItemComponent>
         </MenuList>
       </Menu>
+
+      {/* Modal de respuesta */}
+      <ReplyModal
+        open={replyModalOpen}
+        onClose={handleCloseReplyModal}
+        email={selectedEmail}
+        onSendReply={handleSendReply}
+        isSending={isSendingReply}
+      />
       
     </Box>
   );

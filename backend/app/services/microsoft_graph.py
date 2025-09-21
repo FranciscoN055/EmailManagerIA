@@ -149,13 +149,21 @@ class MicrosoftGraphService:
         """Get user emails from Microsoft Graph."""
         headers = {'Authorization': f'Bearer {access_token}'}
         
-        # Build query parameters
-        params = {
-            '$top': top,
-            '$skip': skip,
-            '$orderby': 'receivedDateTime desc',
-            '$select': 'id,subject,sender,from,toRecipients,receivedDateTime,createdDateTime,body,isRead,importance,flag,hasAttachments,internetMessageHeaders'
-        }
+        # Build query parameters - adjust for sent items folder
+        if folder == 'sentitems':
+            params = {
+                '$top': top,
+                '$skip': skip,
+                '$orderby': 'sentDateTime desc',
+                '$select': 'id,subject,sender,from,toRecipients,sentDateTime,createdDateTime,body,isRead,importance,flag,hasAttachments,conversationId,conversationIndex'
+            }
+        else:
+            params = {
+                '$top': top,
+                '$skip': skip,
+                '$orderby': 'receivedDateTime desc',
+                '$select': 'id,subject,sender,from,toRecipients,receivedDateTime,createdDateTime,body,isRead,importance,flag,hasAttachments,internetMessageHeaders'
+            }
         
         url = f'https://graph.microsoft.com/v1.0/me/mailFolders/{folder}/messages'
         
@@ -213,6 +221,26 @@ class MicrosoftGraphService:
             'Content-Type': 'application/json'
         }
         
+        # Get user profile to use as sender
+        try:
+            profile_response = requests.get(
+                'https://graph.microsoft.com/v1.0/me',
+                headers={'Authorization': f'Bearer {access_token}'},
+                timeout=10
+            )
+            if profile_response.status_code == 200:
+                profile = profile_response.json()
+                sender_email = profile.get('mail') or profile.get('userPrincipalName')
+                sender_name = profile.get('displayName', '')
+            else:
+                logger.error(f"Failed to get user profile: {profile_response.status_code}")
+                sender_email = None
+                sender_name = None
+        except Exception as e:
+            logger.error(f"Error getting user profile: {str(e)}")
+            sender_email = None
+            sender_name = None
+        
         email_data = {
             "message": {
                 "subject": subject,
@@ -228,15 +256,37 @@ class MicrosoftGraphService:
             }
         }
         
+        # Add sender information if available
+        if sender_email:
+            email_data["message"]["from"] = {
+                "emailAddress": {
+                    "address": sender_email,
+                    "name": sender_name
+                }
+            }
+        
         try:
             if reply_to_message_id:
                 # Reply to specific message
                 url = f'https://graph.microsoft.com/v1.0/me/messages/{reply_to_message_id}/reply'
+                logger.info(f"Sending reply to message {reply_to_message_id}")
+                logger.info(f"Reply data: {json.dumps(email_data, indent=2)}")
                 response = requests.post(url, headers=headers, json={"message": email_data["message"]}, timeout=10)
             else:
                 # Send new email
                 url = 'https://graph.microsoft.com/v1.0/me/sendMail'
+                logger.info(f"Sending new email to {to_email}")
+                logger.info(f"Email data: {json.dumps(email_data, indent=2)}")
                 response = requests.post(url, headers=headers, json=email_data, timeout=10)
+            
+            logger.info(f"Email send response: {response.status_code}")
+            if response.status_code != 202:
+                logger.error(f"Email send failed: {response.status_code} - {response.text}")
+                try:
+                    error_data = response.json()
+                    logger.error(f"Error details: {json.dumps(error_data, indent=2)}")
+                except:
+                    pass
             
             return response.status_code == 202
         except Exception as e:
@@ -300,3 +350,26 @@ class MicrosoftGraphService:
         except Exception as e:
             logger.error(f"Error searching emails: {str(e)}")
             return None
+    
+    def get_user_photo(self, access_token):
+        """
+        Obtiene la foto de perfil del usuario autenticado en Microsoft.
+        Devuelve los bytes de la imagen o None si no hay foto.
+        """
+        url = "https://graph.microsoft.com/v1.0/me/photo/$value"
+        headers = {"Authorization": f"Bearer {access_token}"}
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            return response.content  # Imagen en bytes
+        return None
+    
+    def get_user_profile(self, access_token):
+        """
+        Obtiene el perfil del usuario autenticado en Microsoft.
+        """
+        url = "https://graph.microsoft.com/v1.0/me"
+        headers = {"Authorization": f"Bearer {access_token}"}
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            return response.json()
+        return None

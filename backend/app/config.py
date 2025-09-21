@@ -18,6 +18,14 @@ class Config:
     
     # Database Configuration
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'sqlite:///email_manager.db'
+    
+    # Fallback to SQLite if PostgreSQL fails
+    if SQLALCHEMY_DATABASE_URI.startswith('postgresql://'):
+        try:
+            import psycopg2
+        except ImportError:
+            print("Warning: psycopg2 not available, falling back to SQLite")
+            SQLALCHEMY_DATABASE_URI = 'sqlite:///email_manager.db'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
         'pool_pre_ping': True,
@@ -35,13 +43,17 @@ class Config:
         'https://graph.microsoft.com/Mail.Send',
         'offline_access'
     ]
-    MICROSOFT_REDIRECT_URI = os.environ.get('MICROSOFT_REDIRECT_URI') or 'http://localhost:5000/auth/microsoft/callback'
+    # Auto-detect redirect URI based on environment
+    if os.environ.get('FLASK_ENV') == 'production':
+        MICROSOFT_REDIRECT_URI = os.environ.get('MICROSOFT_REDIRECT_URI') or 'https://emailmanageriatesting.onrender.com/auth/callback'
+    else:
+        MICROSOFT_REDIRECT_URI = os.environ.get('MICROSOFT_REDIRECT_URI') or 'http://localhost:5178/auth/callback'
     
     # OpenAI Configuration
     OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
-    OPENAI_MODEL = 'gpt-4'
-    OPENAI_MAX_TOKENS = 1000
-    OPENAI_TEMPERATURE = 0.3
+    OPENAI_MODEL = os.environ.get('OPENAI_MODEL', 'gpt-4o-mini')
+    OPENAI_MAX_TOKENS = int(os.environ.get('OPENAI_MAX_TOKENS', 1000))
+    OPENAI_TEMPERATURE = float(os.environ.get('OPENAI_TEMPERATURE', 0.3))
     
     # Redis Configuration (for Celery)
     REDIS_URL = os.environ.get('REDIS_URL') or 'redis://localhost:6379/0'
@@ -58,7 +70,12 @@ class Config:
         'http://localhost:3000', 'http://localhost:5173', 'http://localhost:5174', 
         'http://localhost:5175', 'http://localhost:5176', 'http://localhost:5177', 
         'http://localhost:5178', 'http://127.0.0.1:5173', 'http://127.0.0.1:5174',
-        'http://127.0.0.1:5175', 'http://192.168.1.37:5173', 'http://192.168.1.37:5174'
+        'http://127.0.0.1:5175', 'http://192.168.1.37:5173', 'http://192.168.1.37:5174',
+        'https://email-manager-ia-testing.vercel.app',
+        'https://email-manager-ia-testing-mj1cw77jx.vercel.app',
+        'https://email-manager-ia-testing-7wyk0l360.vercel.app',
+        'https://email-manager-ia-testing-jksonan0r.vercel.app',
+        'https://email-manager-7z56xba0p-vhernandezls-projects.vercel.app'
     ]
 
 class DevelopmentConfig(Config):
@@ -71,9 +88,21 @@ class ProductionConfig(Config):
     DEBUG = False
     FLASK_ENV = 'production'
     
+    # Use PostgreSQL in production
+    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'postgresql://email_manager_user:GQWBUD04ZlWyKuisF269nmIS98YtpVnz@dpg-d33fpd3uibrs73ajf8ug-a.oregon-postgres.render.com/email_manager'
+    
     # Override with production-specific settings
-    CORS_ORIGINS = ['https://yourdomain.com']
-    MICROSOFT_REDIRECT_URI = os.environ.get('MICROSOFT_REDIRECT_URI') or 'https://yourdomain.com/auth/microsoft/callback'
+    CORS_ORIGINS = [
+        'https://emailmanageriatesting.onrender.com',
+        'https://email-manager-ia-testing.vercel.app',
+        'https://email-manager-ia-testing-mj1cw77jx.vercel.app',
+        'https://email-manager-ia-testing-7wyk0l360.vercel.app',
+        'https://email-manager-ia-testing-jksonan0r.vercel.app',
+        'https://email-manager-7z56xba0p-vhernandezls-projects.vercel.app',
+        'http://localhost:3000',
+        'http://localhost:5173'
+    ]
+    MICROSOFT_REDIRECT_URI = os.environ.get('MICROSOFT_REDIRECT_URI') or 'https://emailmanageriatesting.onrender.com/auth/callback'
 
 class TestingConfig(Config):
     """Testing configuration."""

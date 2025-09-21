@@ -1,7 +1,8 @@
 import axios from 'axios';
 
-// Configuración base de Axios
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+// Configuración base de Axios - Detecta automáticamente el entorno
+const API_URL = import.meta.env.VITE_API_URL || 
+  (import.meta.env.DEV ? 'http://localhost:5000/api' : 'https://emailmanageriatesting.onrender.com/api');
 
 const api = axios.create({
   baseURL: API_URL,
@@ -54,6 +55,18 @@ api.interceptors.response.use(
   }
 );
 
+// Keep alive function for free tier
+export const keepAlive = () => {
+  setInterval(async () => {
+    try {
+      await api.get('/ping');
+      console.log('Server pinged successfully');
+    } catch (error) {
+      console.log('Ping failed:', error.message);
+    }
+  }, 10 * 60 * 1000); // Ping every 10 minutes
+};
+
 // Funciones de la API
 export const authAPI = {
   login: (credentials) => api.post('/auth/login', credentials),
@@ -66,8 +79,14 @@ export const emailAPI = {
   connectAccount: (data) => api.post('/emails/connect', data),
   getEmails: (params) => api.get('/emails/', { params }),
   getEmailsByUrgency: (urgency) => api.get(`/emails/urgency/${urgency}`),
-  markAsRead: (emailId) => api.patch(`/emails/${emailId}/read`),
+  markEmailAsRead: (emailId) => api.post(`/emails/${emailId}/mark-read`),
   syncEmails: (data) => api.post('/emails/sync', data),
+  syncEmailStatuses: (data) => api.post('/emails/sync-status', data),
+  sendEmail: (data) => api.post('/emails/send', data),
+  replyToEmail: (emailId, data) => api.post(`/emails/${emailId}/reply`, data),
+  getSentEmails: (params) => api.get('/emails/sent', { params }),
+  autoClassifyEmails: () => api.post('/emails/auto-classify'),
+  retryClassification: () => api.post('/emails/classify-retry'),
 };
 
 export const microsoftAPI = {

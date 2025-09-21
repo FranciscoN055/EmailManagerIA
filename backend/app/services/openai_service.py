@@ -20,30 +20,40 @@ class OpenAIService:
     def __init__(self, config=None):
         self.config = config or current_app.config
         self.api_key = self.config.get('OPENAI_API_KEY')
-        self.model = self.config.get('OPENAI_MODEL', 'gpt-4')
-        self.max_tokens = self.config.get('OPENAI_MAX_TOKENS', 800)
-        self.temperature = self.config.get('OPENAI_TEMPERATURE', 0.3)
+        self.model = self.config.get('OPENAI_MODEL', 'gpt-4o-mini')
+        self.max_tokens = int(self.config.get('OPENAI_MAX_TOKENS', 800))
+        self.temperature = float(self.config.get('OPENAI_TEMPERATURE', 0.3))
         
         self.client = None
-        if self.api_key:
-            self.client = OpenAI(api_key=self.api_key)
+        if self.api_key and self.api_key != 'your-openai-api-key-here':
+            try:
+                self.client = OpenAI(api_key=self.api_key)
+            except Exception as e:
+                logger.warning(f"Failed to initialize OpenAI client: {e}")
+                self.client = None
         
-        # Academic context patterns
+        # Academic context patterns - REAL urgent situations
         self.urgent_keywords = [
-            'urgente', 'emergencia', 'inmediato', 'hoy mismo', 'crítico',
-            'crisis', 'problema grave', 'accidente', 'suspensión', 'expulsión',
-            'ayuda', 'socorro', 'grave', 'hospital', 'ambulancia', 'lesion',
+            'emergencia', 'accidente', 'hospital', 'ambulancia', 'lesion',
             'lesionado', 'herido', 'caída', 'golpe', 'sangre', 'desmayo',
-            'hospitalizado', 'hospitalizada', 'internado', 'internada',
-            'sistema caído', 'sistema académico caído', 'plataforma caída',
-            'servidor caído', 'no funciona', 'error crítico', 'falla masiva',
-            'estudiante en crisis', 'crisis estudiantil', 'situación crítica',
-            'violencia', 'amenaza', 'peligro', 'riesgo', 'evacuación'
+            'crisis', 'problema grave', 'suspensión', 'expulsión', 'ayuda',
+            'socorro', 'grave', 'inmediato', 'hoy mismo', 'crítico'
+        ]
+        
+        # Non-urgent keywords that might be confused with urgent
+        self.non_urgent_indicators = [
+            'qué día', 'que dia', 'cuando', 'cuándo', 'horario', 'hora',
+            'información', 'consulta', 'pregunta', 'duda', 'ayuda con',
+            'necesito saber', 'podrías decirme', 'me puedes ayudar',
+            'solo quería', 'solo queria', 'nada urgente', 'no es urgente',
+            'cuando puedas', 'cuando tengas tiempo', 'no hay prisa'
         ]
         
         self.high_priority_keywords = [
             'reunión', 'junta', 'consejo', 'deadline', 'plazo', 'entrega',
-            'examen', 'evaluación', 'presentación', 'defensa', 'tesis'
+            'examen', 'evaluación', 'presentación', 'defensa', 'tesis',
+            'calificación', 'nota', 'reprobado', 'aprobado', 'suspensión',
+            'expulsión', 'disciplinario', 'problema', 'conflicto', 'queja'
         ]
         
         self.academic_roles = {
@@ -66,29 +76,32 @@ class OpenAIService:
         
         current_date = datetime.now().strftime('%Y-%m-%d')
         
-        base_prompt = f"""
-Eres un asistente inteligente especializado en clasificar correos electrónicos para Maritza Silva, 
-Directora de la carrera ICIF en Universidad San Sebastián, Chile.
+        # Smart content truncation - keep important parts
+        content = email_data.get('body_preview', '')
+        if len(content) > 400:
+            # Keep first 200 chars and last 200 chars for context
+            content = content[:200] + "..." + content[-200:]
+        
+        base_prompt = f"""Eres un asistente especializado en clasificar correos para Maritza Silva, Directora de ICIF en Universidad San Sebastián, Chile.
 
-CONTEXTO ACADÉMICO:
-- Directora de carrera universitaria
-- Gestiona estudiantes, profesores y personal administrativo
-- Debe responder a emergencias estudiantiles rápidamente
-- Fechas importantes: exámenes, entregas, reuniones académicas
-- Fecha actual: {current_date}
+CONTEXTO: Directora universitaria que gestiona estudiantes, profesores y personal. Debe responder emergencias rápidamente.
 
 NIVELES DE URGENCIA:
-1. URGENTE (próxima 1 hora): Emergencias médicas/estudiantiles, accidentes, crisis de seguridad, sistemas académicos caídos, situaciones que requieren acción INMEDIATA
-2. ALTA (próximas 3 horas): Problemas académicos graves, reuniones urgentes hoy, deadlines críticos, estudiantes en crisis
-3. MEDIA (hoy): Consultas generales, coordinación con profesores, tareas administrativas regulares
-4. BAJA (mañana o más): Información general, invitaciones futuras, documentación no urgente
+1. URGENTE (1 hora): Emergencias médicas, accidentes, crisis de seguridad, acción INMEDIATA
+2. ALTA (3 horas): Problemas académicos graves, reuniones urgentes hoy, deadlines críticos
+3. MEDIA (hoy/próximos días): Solicitudes académicas con plazo, cambios de horario, coordinación
+4. BAJA (mañana+): Información general, invitaciones futuras, documentación no urgente
 
 PALABRAS CLAVE CRÍTICAS para URGENTE:
-- Emergencias médicas: accidente, lesión, hospital, ambulancia, herido, sangre, desmayo, caída, hospitalizado, internado
-- Crisis estudiantiles: estudiante en crisis, crisis estudiantil, situación crítica, ayuda urgente
-- Sistemas críticos: sistema caído, sistema académico caído, plataforma caída, servidor caído, error crítico, falla masiva
-- Seguridad: peligro, amenaza, violencia, evacuación, riesgo grave
-- Palabras de urgencia: crítico, grave, urgente, emergencia, inmediato, socorro
+- Emergencias: accidente, lesión, hospital, ambulancia, herido, sangre, desmayo, caída
+- Crisis: ayuda, socorro, crítico, grave, urgente, emergencia
+- Seguridad: peligro, amenaza, violencia, drogas, alcohol
+
+EJEMPLOS:
+- URGENTE: "Estudiante herido en laboratorio, necesita ambulancia"
+- ALTA: "Reunión urgente hoy a las 3pm para resolver problema académico"
+- MEDIA: "Solicitud cambio de horario con plazo viernes 20 septiembre"
+- BAJA: "Consulta general sobre horarios del próximo semestre"
 
 CORREO A CLASIFICAR:
 Remitente: {email_data.get('sender_name', '')} <{email_data.get('sender_email', '')}>
@@ -99,7 +112,7 @@ Contenido: {email_data.get('body_preview', '')[:500]}
 INSTRUCCIONES:
 1. Analiza el contexto académico del remitente (estudiante/profesor/administración)
 2. Identifica palabras clave de urgencia y deadlines
-3. Considera la proximidad temporal de eventos mencionados
+3. Considera la proximidad temporal de eventos
 4. Evalúa el impacto en las responsabilidades de la directora
 
 Responde SOLO en formato JSON válido:
@@ -111,21 +124,79 @@ Responde SOLO en formato JSON válido:
     "email_type": "academico|administrativo|personal|emergencia",
     "requires_immediate_action": true/false,
     "suggested_deadline": "2024-01-15T14:00:00" // o null
-}}
-"""
+}}"""
         
         return base_prompt.strip()
+    
+    def _lightweight_classification(self, email_data: Dict) -> Dict:
+        """Lightweight classification using minimal tokens."""
+        
+        # Ultra-minimal prompt for basic classification
+        subject = email_data.get('subject', '')
+        content = email_data.get('body_preview', '')[:100]  # Only first 100 chars
+        
+        lightweight_prompt = f"""Clasifica urgencia para directora universitaria:
+
+Asunto: {subject}
+Contenido: {content}
+
+URGENTE: emergencias médicas, accidentes, crisis
+ALTA: reuniones urgentes hoy, deadlines críticos
+MEDIA: consultas académicas, coordinación
+BAJA: información general
+
+JSON:
+{{
+    "urgency_category": "urgent|high|medium|low",
+    "confidence_score": 0.8,
+    "reasoning": "Breve explicación",
+    "sender_type": "estudiante|profesor|administracion|externo",
+    "email_type": "academico|administrativo|personal|emergencia",
+    "requires_immediate_action": true/false
+}}"""
+        
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": lightweight_prompt}],
+                max_tokens=200,  # Reduced tokens
+                temperature=0.3
+            )
+            
+            result = response.choices[0].message.content.strip()
+            logger.info(f"Lightweight classification result: {result[:100]}...")
+            
+            # Parse JSON response
+            import json
+            classification = json.loads(result)
+            
+            # Add missing fields with defaults
+            classification.setdefault('suggested_deadline', None)
+            classification.setdefault('rate_limit_retry', False)
+            
+            return classification
+            
+        except Exception as e:
+            logger.error(f"Lightweight classification error: {str(e)}")
+            raise e
     
     def classify_email(self, email_data: Dict) -> Dict:
         """Classify a single email using OpenAI GPT-4."""
         
+        logger.info(f"Starting email classification for: {email_data.get('subject', 'No subject')[:50]}...")
+        logger.info(f"OpenAI client status: {self.client is not None}")
+        logger.info(f"API key configured: {bool(self.api_key)}")
+        logger.info(f"Model: {self.model}")
+        
         if not self.client:
-            logger.warning("OpenAI client not configured")
+            logger.warning("OpenAI client not configured - using fallback")
             return self._fallback_classification(email_data)
         
         try:
             prompt = self._build_classification_prompt(email_data)
+            logger.info(f"Prompt length: {len(prompt)} characters")
             
+            logger.info("Making OpenAI API call...")
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
@@ -135,12 +206,22 @@ Responde SOLO en formato JSON válido:
                 max_tokens=self.max_tokens,
                 temperature=self.temperature
             )
+            logger.info("OpenAI API call successful")
             
             content = response.choices[0].message.content.strip()
+            logger.info(f"OpenAI response received: {content[:200]}...")
+            
+            # Clean response - remove markdown formatting if present
+            if content.startswith('```json'):
+                content = content[7:]  # Remove ```json
+            if content.endswith('```'):
+                content = content[:-3]  # Remove ```
+            content = content.strip()
             
             # Parse JSON response
             try:
                 classification = json.loads(content)
+                logger.info(f"JSON parsed successfully: {classification}")
                 
                 # Validate required fields
                 required_fields = ['urgency_category', 'confidence_score', 'reasoning']
@@ -158,17 +239,45 @@ Responde SOLO en formato JSON válido:
                 confidence = float(classification['confidence_score'])
                 classification['confidence_score'] = max(0.0, min(1.0, confidence))
                 
-                logger.info(f"Email classified as {urgency} with confidence {confidence}")
+                logger.info(f"✅ Email classified as {urgency} with confidence {confidence}")
                 return classification
                 
             except (json.JSONDecodeError, ValueError, KeyError) as e:
-                logger.error(f"Error parsing OpenAI response: {e}")
+                logger.error(f"❌ Error parsing OpenAI response: {e}")
                 logger.error(f"Raw response: {content}")
+                logger.warning("Falling back to rule-based classification")
                 return self._fallback_classification(email_data)
         
         except Exception as e:
-            logger.error(f"OpenAI API error: {str(e)}")
-            return self._fallback_classification(email_data)
+            error_str = str(e)
+            if "rate_limit" in error_str.lower() or "429" in error_str:
+                logger.warning(f"⚠️  OpenAI Rate limit reached: {error_str}")
+                # In production, we should retry after delay, not fallback
+                from flask import current_app
+                is_production = current_app.config.get('FLASK_ENV') == 'production'
+                
+                if is_production:
+                    logger.info("Production mode: Will retry classification later")
+                    # Set rate limit timestamp
+                    self._last_rate_limit = time.time()
+                    # Return a special status to indicate rate limit
+                    return {
+                        'urgency_category': 'medium',
+                        'confidence_score': 0.0,
+                        'reasoning': 'Rate limit reached - will retry later',
+                        'sender_type': 'externo',
+                        'email_type': 'academico',
+                        'requires_immediate_action': False,
+                        'suggested_deadline': None,
+                        'rate_limit_retry': True
+                    }
+                else:
+                    logger.info("Development mode: Falling back to rule-based classification")
+                    return self._fallback_classification(email_data)
+            else:
+                logger.error(f"❌ OpenAI API error: {error_str}")
+                logger.warning("Falling back to rule-based classification")
+                return self._fallback_classification(email_data)
     
     def _fallback_classification(self, email_data: Dict) -> Dict:
         """Fallback classification when OpenAI is unavailable."""
@@ -179,15 +288,25 @@ Responde SOLO en formato JSON válido:
         text_content = f"{subject} {body}"
         
         # Rule-based classification - start with different defaults to avoid medium bias
-        urgency = 'low'  # Changed from 'medium' to 'low' as default
+        urgency = 'low'  # Start with low as default
         confidence = 0.6
         reasoning = "Clasificación basada en reglas (OpenAI no disponible)"
         
-        # Check for urgent keywords first
-        if any(keyword in text_content for keyword in self.urgent_keywords):
+        # Check for non-urgent indicators first (to avoid false positives)
+        has_non_urgent_indicators = any(keyword in text_content for keyword in self.non_urgent_indicators)
+        has_urgent_keywords = any(keyword in text_content for keyword in self.urgent_keywords)
+        
+        # If it has non-urgent indicators, it's likely not urgent even if it says "urgente"
+        if has_non_urgent_indicators and not has_urgent_keywords:
+            urgency = 'low'
+            confidence = 0.8
+            reasoning = "Contenido indica consulta no urgente (a pesar de palabras como 'urgente')"
+        
+        # Check for REAL urgent keywords (only if no non-urgent indicators)
+        elif has_urgent_keywords and not has_non_urgent_indicators:
             urgency = 'urgent'
             confidence = 0.9
-            reasoning = "Detectadas palabras clave de urgencia crítica"
+            reasoning = "Detectadas palabras clave de urgencia crítica real"
         
         # Check for high priority keywords
         elif any(keyword in text_content for keyword in self.high_priority_keywords):
@@ -195,11 +314,28 @@ Responde SOLO en formato JSON válido:
             confidence = 0.8
             reasoning = "Detectadas palabras clave de alta prioridad académica"
         
-        # Student emails get medium priority (not high by default)
-        elif '@uss.cl' in sender_email or any(keyword in text_content for keyword in ['estudiante', 'alumno', 'alumna']):
+        # Check for medium priority indicators
+        elif any(keyword in text_content for keyword in ['consulta', 'pregunta', 'ayuda', 'información', 'horario', 'clase', 'materia', 'asignatura']):
             urgency = 'medium'
             confidence = 0.7
-            reasoning = "Correo de estudiante USS - requiere atención académica"
+            reasoning = "Consulta académica que requiere respuesta"
+        
+        # Student emails from USS get medium priority only if they contain academic content
+        elif '@uss.cl' in sender_email:
+            if any(keyword in text_content for keyword in ['consulta', 'pregunta', 'ayuda', 'información', 'horario', 'clase', 'materia', 'asignatura', 'profesor', 'docente']):
+                urgency = 'medium'
+                confidence = 0.7
+                reasoning = "Correo de estudiante USS con contenido académico"
+            else:
+                urgency = 'low'
+                confidence = 0.6
+                reasoning = "Correo de estudiante USS - contenido general"
+        
+        # External emails are generally low priority unless urgent keywords
+        else:
+            urgency = 'low'
+            confidence = 0.5
+            reasoning = "Correo externo - prioridad baja"
         
         # Determine sender type
         sender_type = 'externo'
@@ -236,9 +372,12 @@ Responde SOLO en formato JSON válido:
                     classification = self.classify_email(email_data)
                     batch_results.append(classification)
                     
-                    # Small delay to avoid rate limiting
+                    # Adaptive delay based on environment
                     import time
-                    time.sleep(0.5)
+                    from flask import current_app
+                    is_production = current_app.config.get('FLASK_ENV') == 'production'
+                    delay = 10.0 if is_production else 5.0  # Ultra long delay to avoid rate limits
+                    time.sleep(delay)
                     
                 except Exception as e:
                     logger.error(f"Error classifying email: {str(e)}")
@@ -246,10 +385,13 @@ Responde SOLO en formato JSON válido:
             
             results.extend(batch_results)
             
-            # Longer delay between batches
+            # Adaptive delay between batches
             if i + batch_size < len(emails_data):
                 import time
-                time.sleep(2)
+                from flask import current_app
+                is_production = current_app.config.get('FLASK_ENV') == 'production'
+                delay = 30.0 if is_production else 15.0  # Ultra long delay to avoid rate limits
+                time.sleep(delay)
         
         logger.info(f"Completed batch classification of {len(emails_data)} emails")
         return results

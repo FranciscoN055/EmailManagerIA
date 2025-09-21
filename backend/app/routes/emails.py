@@ -97,6 +97,34 @@ def sync_emails():
                 ).first()
                 
                 if existing_email:
+                    # Update existing email's read status and other properties
+                    updated = False
+                    
+                    # Check if isRead status changed
+                    current_is_read = email_data.get('isRead', False)
+                    if existing_email.is_read != current_is_read:
+                        existing_email.is_read = current_is_read
+                        updated = True
+                        logger.info(f"Updated isRead status for email {existing_email.id}: {current_is_read}")
+                    
+                    # Check if importance changed
+                    current_importance = email_data.get('importance', 'normal') == 'high'
+                    if existing_email.is_important != current_importance:
+                        existing_email.is_important = current_importance
+                        updated = True
+                    
+                    # Check if flag status changed (starred)
+                    flag_status = email_data.get('flag', {})
+                    current_starred = flag_status.get('flagStatus', 'notFlagged') != 'notFlagged'
+                    if existing_email.is_starred != current_starred:
+                        existing_email.is_starred = current_starred
+                        updated = True
+                    
+                    if updated:
+                        existing_email.updated_at = datetime.now()
+                        db.session.add(existing_email)
+                        logger.info(f"Updated existing email {existing_email.id}")
+                    
                     skipped_count += 1
                     continue
                 
@@ -244,8 +272,11 @@ def get_emails():
                 }
             })
         
-        # Build query for emails from user's accounts
-        query = Email.query.filter(Email.email_account_id.in_(account_ids))
+        # Build query for emails from user's accounts (exclude replied emails)
+        query = Email.query.filter(
+            Email.email_account_id.in_(account_ids),
+            Email.processing_status != 'replied'  # Don't show emails that have been replied to
+        )
         
         if urgency:
             query = query.filter(Email.urgency_category == urgency)
@@ -283,12 +314,14 @@ def get_emails():
                     'email': email.sender_email
                 },
                 'preview': email.body_preview,
+                'body_content': email.body_content,  # Add full content
+                'body_preview': email.body_preview,  # Keep preview for compatibility
                 'received_at': email.received_at.isoformat(),
                 'is_read': email.is_read,
                 'has_attachments': email.has_attachments,
                 'urgency_category': email.urgency_category,
                 'priority_level': email.priority_level,
-                'confidence_score': email.ai_confidence,
+                'ai_confidence': email.ai_confidence,
                 'processing_status': email.processing_status,
                 'ai_classification_reason': email.ai_reasoning
             })
@@ -353,7 +386,7 @@ def get_email_detail(email_id):
                 'is_important': email.is_important,
                 'urgency_category': email.urgency_category,
                 'priority_level': email.priority_level,
-                'confidence_score': email.ai_confidence,
+                'ai_confidence': email.ai_confidence,
                 'processing_status': email.processing_status,
                 'ai_classification_reason': email.ai_reasoning,
                 'created_at': email.created_at.isoformat(),
@@ -396,12 +429,19 @@ def mark_email_read(email_id):
             is_active=True
         ).first()
         
-        if email_account and email.microsoft_email_id:
-            service = MicrosoftGraphService()
-            service.mark_email_as_read(
-                email_account.access_token,
-                email.microsoft_email_id
-            )
+        # Mark as read in Microsoft Graph first
+        microsoft_success = False
+        if email_account and email.microsoft_email_id and email_account.access_token:
+            try:
+                service = MicrosoftGraphService()
+                microsoft_success = service.mark_email_as_read(
+                    email_account.access_token,
+                    email.microsoft_email_id
+                )
+                logger.info(f"Microsoft Graph mark as read result: {microsoft_success}")
+            except Exception as e:
+                logger.warning(f"Failed to mark email as read in Microsoft: {str(e)}")
+                # Continue with local update even if Microsoft fails
         
         # Update local record
         email.is_read = True
@@ -409,7 +449,9 @@ def mark_email_read(email_id):
         
         return jsonify({
             'success': True,
-            'message': 'Email marked as read'
+            'message': 'Email marked as read',
+            'microsoft_updated': microsoft_success,
+            'local_updated': True
         })
     
     except Exception as e:
@@ -417,6 +459,92 @@ def mark_email_read(email_id):
         return jsonify({
             'success': False,
             'error': 'Failed to mark email as read'
+        }), 500
+
+@emails_bp.route('/sync-status', methods=['GET', 'POST'])
+@jwt_required()
+def sync_email_statuses():
+    """Sync read/unread status of all emails with Microsoft Graph."""
+    try:
+        user_id = get_jwt_identity()
+        
+        # Get user's email accounts
+        email_account = EmailAccount.query.filter_by(
+            user_id=user_id,
+            provider='microsoft',
+            is_active=True
+        ).first()
+        
+        if not email_account or not email_account.access_token:
+            return jsonify({
+                'success': False,
+                'error': 'Microsoft account not connected'
+            }), 400
+        
+        # Handle both GET and POST requests
+        if request.method == 'GET':
+            # For GET requests, just return status without syncing
+            return jsonify({
+                'success': True,
+                'message': 'Sync status endpoint available',
+                'account_connected': True
+            })
+        
+        # For POST requests, perform actual sync
+        # Get parameters
+        data = request.get_json() or {}
+        limit = min(data.get('limit', 100), 200)  # Max 200 emails
+        
+        service = MicrosoftGraphService()
+        
+        # Fetch recent emails from Microsoft to sync status
+        emails_data = service.get_user_emails(
+            email_account.access_token,
+            top=limit,
+            folder='inbox'
+        )
+        
+        if not emails_data or 'value' not in emails_data:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to fetch emails from Microsoft'
+            }), 400
+        
+        updated_count = 0
+        processed_count = 0
+        
+        for email_data in emails_data['value']:
+            processed_count += 1
+            microsoft_id = email_data['id']
+            current_is_read = email_data.get('isRead', False)
+            
+            # Find local email
+            local_email = Email.query.filter_by(
+                microsoft_email_id=microsoft_id,
+                email_account_id=email_account.id
+            ).first()
+            
+            if local_email and local_email.is_read != current_is_read:
+                local_email.is_read = current_is_read
+                local_email.updated_at = datetime.now()
+                db.session.add(local_email)
+                updated_count += 1
+                logger.info(f"Synced read status for email {local_email.id}: {current_is_read}")
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Synchronized {updated_count} email statuses',
+            'updated_count': updated_count,
+            'processed_count': processed_count
+        })
+    
+    except Exception as e:
+        logger.error(f"Error syncing email statuses: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to sync email statuses'
         }), 500
 
 @emails_bp.route('/<email_id>/update-urgency', methods=['POST'])
@@ -588,6 +716,9 @@ def send_email():
         
         service = MicrosoftGraphService()
         
+        logger.info(f"Attempting to send email to {data['to_email']}")
+        logger.info(f"Email subject: {data['subject']}")
+        
         # Send email via Microsoft Graph
         success = service.send_email(
             access_token=email_account.access_token,
@@ -595,6 +726,8 @@ def send_email():
             subject=data['subject'],
             body=data['body']
         )
+        
+        logger.info(f"Send email result: {success}")
         
         if success:
             return jsonify({
@@ -665,6 +798,10 @@ def reply_to_email(email_id):
             reply_subject = f"RE: {reply_subject}"
         
         # Send reply via Microsoft Graph
+        logger.info(f"Attempting to send reply to {email.sender_email}")
+        logger.info(f"Reply subject: {reply_subject}")
+        logger.info(f"Original email ID: {email.microsoft_email_id}")
+        
         success = service.send_email(
             access_token=email_account.access_token,
             to_email=email.sender_email,
@@ -673,14 +810,14 @@ def reply_to_email(email_id):
             reply_to_message_id=email.microsoft_email_id
         )
         
+        logger.info(f"Send email result: {success}")
+        
         if success:
-            # Mark original email as read and processed
+            # Mark original email as read and hidden (replied to)
             email.is_read = True
-            email.processing_status = 'processed'
-            if email.urgency_category not in ['processed']:
-                email.urgency_category = 'processed'
-                email.priority_level = 5
-            
+            email.processing_status = 'replied'  # Different status so it doesn't appear in dashboard
+            # Don't change urgency_category to 'processed' to avoid showing in processed column
+
             db.session.commit()
             
             return jsonify({
@@ -703,6 +840,57 @@ def reply_to_email(email_id):
         return jsonify({
             'success': False,
             'error': 'Failed to send reply'
+        }), 500
+
+@emails_bp.route('/test-send', methods=['POST'])
+@jwt_required()
+def test_send_email():
+    """Test endpoint to send a simple email for debugging."""
+    try:
+        user_id = get_jwt_identity()
+        
+        # Get email account
+        email_account = EmailAccount.query.filter_by(
+            user_id=user_id,
+            provider='microsoft',
+            is_active=True
+        ).first()
+        
+        if not email_account:
+            return jsonify({
+                'success': False,
+                'error': 'Microsoft account not connected'
+            }), 400
+        
+        service = MicrosoftGraphService()
+        
+        # Send test email to yourself
+        test_email = email_account.email_address
+        test_subject = "Test Email from Email Manager IA - Debug"
+        test_body = "<p>This is a test email to verify send functionality.</p><p>If you receive this, the send functionality is working correctly.</p>"
+        
+        logger.info(f"Testing email send to {test_email}")
+        
+        success = service.send_email(
+            access_token=email_account.access_token,
+            to_email=test_email,
+            subject=test_subject,
+            body=test_body
+        )
+        
+        logger.info(f"Test email send result: {success}")
+        
+        return jsonify({
+            'success': success,
+            'message': 'Test email sent successfully' if success else 'Failed to send test email',
+            'test_email': test_email
+        })
+    
+    except Exception as e:
+        logger.error(f"Error testing email send: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to test email send'
         }), 500
 
 @emails_bp.route('/search', methods=['GET'])
@@ -887,6 +1075,29 @@ def classify_emails():
             'error': 'Email classification failed'
         }), 500
 
+@emails_bp.route('/ai-status', methods=['GET'])
+@jwt_required()
+def get_ai_status():
+    """Get AI service status and configuration."""
+    try:
+        from app.services.openai_service import OpenAIService
+        
+        openai_service = OpenAIService()
+        status = openai_service.get_status()
+        
+        return jsonify({
+            'success': True,
+            'ai_service': status,
+            'message': 'AI service status retrieved successfully'
+        })
+    
+    except Exception as e:
+        logger.error(f"Error getting AI status: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to get AI service status'
+        }), 500
+
 @emails_bp.route('/<email_id>/classify', methods=['POST'])
 @jwt_required()
 def classify_single_email(email_id):
@@ -944,7 +1155,7 @@ def classify_single_email(email_id):
                 'id': str(email.id),
                 'urgency_category': email.urgency_category,
                 'priority_level': email.priority_level,
-                'confidence_score': email.ai_confidence,
+                'ai_confidence': email.ai_confidence,
                 'reasoning': email.ai_reasoning
             },
             'classification': classification,
@@ -994,7 +1205,7 @@ def get_classification_stats():
         for email in emails:
             classifications.append({
                 'urgency_category': email.urgency_category,
-                'confidence_score': email.ai_confidence,
+                'ai_confidence': email.ai_confidence,
                 'sender_type': 'externo',  # Would need to store this in DB
                 'email_type': 'academico',  # Would need to store this in DB
                 'requires_immediate_action': email.urgency_category in ['urgent', 'high']
@@ -1071,4 +1282,342 @@ def get_openai_status():
         return jsonify({
             'success': False,
             'error': 'Failed to get OpenAI status'
+        }), 500
+
+@emails_bp.route('/openai-rate-limit', methods=['GET'])
+@jwt_required()
+def check_openai_rate_limit():
+    """Check OpenAI rate limit status."""
+    try:
+        from app.services.openai_service import OpenAIService
+        
+        openai_service = OpenAIService()
+        status = openai_service.get_status()
+        
+        # Add rate limit info
+        status['rate_limit_info'] = {
+            'free_tier_limit': '3 requests per minute',
+            'recommended_batch_size': 3,
+            'recommended_delay': '2 seconds between requests'
+        }
+        
+        return jsonify({
+            'success': True,
+            'openai_status': status,
+            'message': 'OpenAI rate limit status retrieved'
+        })
+    
+    except Exception as e:
+        logger.error(f"Error checking OpenAI rate limit: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to check OpenAI rate limit status'
+        }), 500
+
+@emails_bp.route('/classify-retry', methods=['POST'])
+@jwt_required()
+def retry_classification():
+    """Retry classification for emails that hit rate limit."""
+    try:
+        user_id = get_jwt_identity()
+        
+        # Get user's email accounts first
+        user_email_accounts = EmailAccount.query.filter_by(user_id=user_id).all()
+        account_ids = [account.id for account in user_email_accounts]
+        
+        if not account_ids:
+            return jsonify({
+                'success': True,
+                'message': 'No email accounts found',
+                'classified': 0
+            })
+        
+        # Get emails that need retry (those with rate_limit_retry flag)
+        retry_emails = Email.query.filter(
+            Email.email_account_id.in_(account_ids),
+            Email.processing_status == 'pending',
+            Email.ai_reasoning.like('%Rate limit reached%')
+        ).order_by(Email.received_at.desc()).limit(3).all()  # Only 3 at a time
+        
+        if not retry_emails:
+            return jsonify({
+                'success': True,
+                'message': 'No emails need retry classification',
+                'classified': 0
+            })
+        
+        # Prepare email data for OpenAI
+        emails_data = []
+        for email in retry_emails:
+            emails_data.append({
+                'email_id': str(email.id),
+                'subject': email.subject,
+                'sender_name': email.sender_name,
+                'sender_email': email.sender_email,
+                'body_preview': email.body_preview,
+                'received_at': email.received_at.isoformat()
+            })
+        
+        # Classify with OpenAI (very conservative)
+        openai_service = OpenAIService()
+        logger.info(f"Retrying classification for {len(emails_data)} emails")
+        
+        classifications = openai_service.classify_batch(emails_data, batch_size=1)  # One at a time
+        
+        # Update emails with classification results
+        classified_count = 0
+        for i, email in enumerate(retry_emails):
+            if i < len(classifications):
+                classification = classifications[i]
+                
+                # Skip if still rate limited
+                if classification.get('rate_limit_retry'):
+                    continue
+                
+                email.urgency_category = classification.get('urgency_category', 'medium')
+                email.priority_level = get_priority_from_urgency(email.urgency_category)
+                email.ai_confidence = classification.get('confidence_score', 0.0)
+                email.ai_reasoning = classification.get('reasoning', '')
+                email.processing_status = 'classified'
+                email.is_classified = True
+                email.classified_at = datetime.now()
+                email.classification_model = openai_service.model
+                
+                classified_count += 1
+                logger.info(f"Retry classified email {email.id} as {email.urgency_category}")
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Retry classified {classified_count} emails',
+            'classified': classified_count,
+            'total_retry': len(retry_emails)
+        })
+    
+    except Exception as e:
+        logger.error(f"Error in retry classification: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Retry classification failed'
+        }), 500
+
+@emails_bp.route('/auto-classify', methods=['POST'])
+@jwt_required()
+def auto_classify_emails():
+    """Automatically classify all pending emails when app opens."""
+    try:
+        user_id = get_jwt_identity()
+        logger.info(f"Starting auto-classification for user {user_id}")
+        
+        # Get user's email accounts first
+        user_email_accounts = EmailAccount.query.filter_by(user_id=user_id).all()
+        account_ids = [account.id for account in user_email_accounts]
+        
+        if not account_ids:
+            return jsonify({
+                'success': True,
+                'message': 'No email accounts found',
+                'classified': 0
+            })
+        
+        # Get pending emails (not classified yet) - Different limits for dev vs prod
+        from flask import current_app
+        is_production = current_app.config.get('FLASK_ENV') == 'production'
+        
+        # Emergency mode: ultra conservative limits
+        limit = 1 if is_production else 2  # Ultra conservative - 1 email at a time
+        pending_emails = Email.query.filter(
+            Email.email_account_id.in_(account_ids),
+            Email.processing_status == 'pending'
+        ).order_by(Email.received_at.desc()).limit(limit).all()
+        
+        if not pending_emails:
+            logger.info(f"No pending emails to classify for user {user_id}")
+            return jsonify({
+                'success': True,
+                'message': 'No pending emails to classify',
+                'classified': 0
+            })
+        
+        logger.info(f"Found {len(pending_emails)} pending emails to classify")
+        
+        # Prepare email data for OpenAI
+        emails_data = []
+        for email in pending_emails:
+            emails_data.append({
+                'email_id': str(email.id),
+                'subject': email.subject,
+                'sender_name': email.sender_name,
+                'sender_email': email.sender_email,
+                'body_preview': email.body_preview,
+                'received_at': email.received_at.isoformat()
+            })
+        
+        # Classify with OpenAI
+        openai_service = OpenAIService()
+        logger.info(f"Classifying {len(emails_data)} emails with OpenAI")
+        
+        # Different batch sizes for dev vs prod - ultra conservative
+        batch_size = 1  # Always 1 at a time to avoid rate limits
+        classifications = openai_service.classify_batch(emails_data, batch_size=batch_size)
+        
+        # Update emails with classification results
+        classified_count = 0
+        for i, email in enumerate(pending_emails):
+            if i < len(classifications):
+                classification = classifications[i]
+                
+                email.urgency_category = classification.get('urgency_category', 'medium')
+                email.priority_level = get_priority_from_urgency(email.urgency_category)
+                email.ai_confidence = classification.get('confidence_score', 0.0)
+                email.ai_reasoning = classification.get('reasoning', '')
+                email.processing_status = 'classified'
+                email.is_classified = True
+                email.classified_at = datetime.now()
+                email.classification_model = openai_service.model
+                
+                classified_count += 1
+                logger.info(f"Classified email {email.id} as {email.urgency_category}")
+        
+        db.session.commit()
+        
+        # Generate classification stats
+        classification_stats = openai_service.get_classification_stats(classifications)
+        
+        logger.info(f"Auto-classification completed: {classified_count} emails classified")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Auto-classified {classified_count} emails',
+            'classified': classified_count,
+            'total_pending': len(pending_emails),
+            'classification_stats': classification_stats
+        })
+    
+    except Exception as e:
+        logger.error(f"Error in auto-classification: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Auto-classification failed'
+        }), 500
+
+@emails_bp.route('/sent', methods=['GET'])
+@jwt_required()
+def get_sent_emails():
+    """Get user's sent emails from Microsoft Graph SentItems folder."""
+    try:
+        user_id = get_jwt_identity()
+
+        # Get query parameters
+        page = request.args.get('page', 1, type=int)
+        per_page = min(request.args.get('per_page', 50, type=int), 200)
+
+        # Get email account
+        email_account = EmailAccount.query.filter_by(
+            user_id=user_id,
+            provider='microsoft',
+            is_active=True
+        ).first()
+
+        if not email_account:
+            return jsonify({
+                'success': False,
+                'error': 'Microsoft account not connected'
+            }), 400
+
+        # Check if we have a valid access token
+        if not email_account.access_token:
+            return jsonify({
+                'success': False,
+                'error': 'No access token available. Please reconnect your Microsoft account.'
+            }), 401
+
+        service = MicrosoftGraphService()
+
+        # Fetch sent emails from Microsoft Graph SentItems folder
+        emails_data = service.get_user_emails(
+            email_account.access_token,
+            top=per_page,
+            folder='sentitems'  # This is the SentItems folder
+        )
+
+        if not emails_data:
+            logger.error(f"Failed to fetch sent emails - likely token expired for user {user_id}")
+            return jsonify({
+                'success': False,
+                'error': 'Failed to fetch sent emails from Microsoft. Token may have expired. Please reconnect your account.'
+            }), 401
+
+        if 'value' not in emails_data:
+            logger.error(f"Unexpected response format from Microsoft Graph: {emails_data}")
+            return jsonify({
+                'success': False,
+                'error': 'Unexpected response format from Microsoft Graph'
+            }), 400
+
+        # Format sent emails for frontend
+        sent_emails = []
+        for email_data in emails_data['value']:
+            # Extract recipient information
+            recipients = email_data.get('toRecipients', [])
+            recipient_names = []
+            recipient_emails = []
+
+            for recipient in recipients:
+                email_addr = recipient.get('emailAddress', {})
+                name = email_addr.get('name', '')
+                email = email_addr.get('address', '')
+                if name:
+                    recipient_names.append(name)
+                if email:
+                    recipient_emails.append(email)
+
+            # Format recipient display (like Outlook shows)
+            recipient_display = '; '.join(recipient_names) if recipient_names else '; '.join(recipient_emails)
+
+            # Extract email preview
+            body_preview = extract_email_preview(
+                email_data.get('body', {}).get('content', ''),
+                max_length=200
+            )
+
+            # Determine if this is a reply or a new email
+            subject = email_data.get('subject', '')
+            is_reply = (
+                subject.lower().startswith('re:') or
+                subject.lower().startswith('resp:') or
+                subject.lower().startswith('respuesta:')
+                # Remove conversationId check as it exists for all emails
+            )
+
+            email_type = 'reply' if is_reply else 'sent'
+
+            sent_emails.append({
+                'id': email_data['id'],
+                'subject': subject,
+                'recipient': {
+                    'name': recipient_display,  # This is what shows in "To" field
+                    'emails': recipient_emails
+                },
+                'preview': body_preview,
+                'body_content': email_data.get('body', {}).get('content', ''),
+                'sent_at': email_data.get('sentDateTime', ''),
+                'has_attachments': email_data.get('hasAttachments', False),
+                'email_type': email_type,  # 'sent' or 'reply'
+                'is_reply': is_reply
+            })
+
+        return jsonify({
+            'success': True,
+            'emails': sent_emails,
+            'total_found': len(sent_emails),
+            'message': f'Retrieved {len(sent_emails)} sent emails'
+        })
+
+    except Exception as e:
+        logger.error(f"Error getting sent emails: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to retrieve sent emails'
         }), 500
