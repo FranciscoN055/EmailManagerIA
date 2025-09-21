@@ -19,13 +19,10 @@ class Config:
     # Database Configuration
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'sqlite:///email_manager.db'
     
-    # Fallback to SQLite if PostgreSQL fails
-    if SQLALCHEMY_DATABASE_URI.startswith('postgresql://'):
-        try:
-            import psycopg2
-        except ImportError:
-            print("Warning: psycopg2 not available, falling back to SQLite")
-            SQLALCHEMY_DATABASE_URI = 'sqlite:///email_manager.db'
+    # Force PostgreSQL in production
+    if os.environ.get('FLASK_ENV') == 'production':
+        if not SQLALCHEMY_DATABASE_URI.startswith('postgresql://'):
+            raise ValueError("Production environment requires PostgreSQL database")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
         'pool_pre_ping': True,
