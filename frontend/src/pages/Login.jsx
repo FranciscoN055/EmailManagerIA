@@ -1,8 +1,21 @@
 import { Container, Paper, Typography, Button, Box } from '@mui/material';
 import { Microsoft } from '@mui/icons-material';
 import { microsoftAPI } from '../services/api';
+import { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 const Login = () => {
+  const navigate = useNavigate();
+
+  // Verificar si ya hay un token al cargar la página
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      console.log('Token encontrado, redirigiendo al dashboard...');
+      navigate('/dashboard');
+    }
+  }, [navigate]);
+
   const handleMicrosoftLogin = async () => {
     try {
       console.log('Obteniendo URL de autenticación de Microsoft...');
