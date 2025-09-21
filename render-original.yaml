@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: email-manager-backend-nuevo
+    name: email-manager-backend
     env: python
     plan: free
     pythonVersion: "3.11"
@@ -15,7 +15,7 @@ services:
       - key: JWT_SECRET_KEY
         generateValue: true
       - key: DATABASE_URL
-        value: postgresql://usuario:password@host:puerto/database
+        value: postgresql://email_manager_user:GQWBUD04ZlWyKuisF269nmIS98YtpVnz@dpg-d33fpd3uibrs73ajf8ug-a.oregon-postgres.render.com/email_manager
       - key: MICROSOFT_CLIENT_ID
         sync: false
       - key: MICROSOFT_CLIENT_SECRET
@@ -23,7 +23,7 @@ services:
       - key: MICROSOFT_TENANT_ID
         sync: false
       - key: MICROSOFT_REDIRECT_URI
-        value: https://email-manager-backend-nuevo.onrender.com/auth/callback
+        value: https://emailmanageriatesting.onrender.com/auth/callback
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_MODEL
@@ -32,3 +32,8 @@ services:
         value: "1000"
       - key: OPENAI_TEMPERATURE
         value: "0.3"
+
+  - type: pserv
+    name: email-manager-db
+    env: postgresql
+    plan: free

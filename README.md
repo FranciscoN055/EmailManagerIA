@@ -24,12 +24,23 @@ Email Manager IA es una solución completa que ayuda a directores académicos co
 └── 📋 README.md
 ```
 
-## 🚀 Instalación Rápida
+## 🚀 Despliegue en Producción
+
+### 🌐 URLs de Producción
+- **Frontend**: https://email-manager-ia-testing.vercel.app
+- **Backend**: https://emailmanageriatesting.onrender.com
+- **API Health**: https://emailmanageriatesting.onrender.com/api/health
 
 ### 📚 Guías de Despliegue
 - **[Guía Completa de Despliegue](DEPLOYMENT_GUIDE.md)** - Proceso detallado para Vercel + Render
 - **[Checklist de Despliegue](DEPLOYMENT_CHECKLIST.md)** - Lista de verificación paso a paso
 - **[Funcionalidad de Respuestas](REPLY_FUNCTIONALITY.md)** - Documentación de la funcionalidad de respuestas
+
+### ✅ Características de Producción
+- 🤖 **Clasificación automática** al abrir la aplicación
+- 🔄 **Sincronización automática** con Microsoft Graph
+- 🚀 **Despliegue automático** en Vercel y Render
+- 🔧 **Configuración optimizada** para producción
 
 ### Para Colaboradores (Nuevo en el Proyecto)
 
@@ -62,23 +73,31 @@ cp .env.example .env
 
 ### Para Desarrollo Local
 
-#### Backend (Terminal 1):
+#### Opción 1: Script Automático (Recomendado)
 ```bash
-cd backend
-python -m venv venv
-venv\Scripts\activate  # Windows
-# source venv/bin/activate  # Linux/Mac
-pip install -r requirements.txt
-python -m flask run --debug --port=5000
+# Verificar configuración
+python check_config.py
+
+# Iniciar desarrollo automático
+python start_dev.py
 ```
 
-#### Frontend (Terminal 2):
+#### Opción 2: Manual
 ```bash
+# Backend (Terminal 1)
+cd backend
+python run.py
+
+# Frontend (Terminal 2)
 cd frontend
-npm install
 npm run dev
-# Se abre automáticamente en http://localhost:5178
 ```
+
+#### URLs de Desarrollo:
+- **Frontend**: http://localhost:5178
+- **Backend**: http://localhost:5000
+- **API**: http://localhost:5000/api
+- **Health Check**: http://localhost:5000/api/health
 
 ## 🎨 Frontend (React)
 

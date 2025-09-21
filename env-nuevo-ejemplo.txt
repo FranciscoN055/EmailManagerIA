@@ -1,0 +1,23 @@
+# Variables de Entorno para Nueva Cuenta
+# Copia este archivo como .env y completa los valores
+
+# Backend (Render)
+FLASK_ENV=production
+SECRET_KEY=tu-secret-key-muy-largo-y-seguro-aqui
+JWT_SECRET_KEY=tu-jwt-secret-key-muy-largo-y-seguro-aqui
+DATABASE_URL=postgresql://usuario:password@host:puerto/database
+
+# Microsoft Azure
+MICROSOFT_CLIENT_ID=tu-client-id-aqui
+MICROSOFT_CLIENT_SECRET=tu-client-secret-aqui
+MICROSOFT_TENANT_ID=tu-tenant-id-aqui
+MICROSOFT_REDIRECT_URI=https://tu-backend-nuevo.onrender.com/auth/callback
+
+# OpenAI
+OPENAI_API_KEY=tu-openai-api-key-aqui
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_MAX_TOKENS=1000
+OPENAI_TEMPERATURE=0.3
+
+# Frontend (Vercel)
+VITE_API_URL=https://tu-backend-nuevo.onrender.com/api

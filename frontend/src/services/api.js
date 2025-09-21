@@ -1,7 +1,8 @@
 import axios from 'axios';
 
-// Configuración base de Axios
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+// Configuración base de Axios - Detecta automáticamente el entorno
+const API_URL = import.meta.env.VITE_API_URL || 
+  (import.meta.env.DEV ? 'http://localhost:5000/api' : 'https://emailmanageriatesting.onrender.com/api');
 
 const api = axios.create({
   baseURL: API_URL,
@@ -84,6 +85,8 @@ export const emailAPI = {
   sendEmail: (data) => api.post('/emails/send', data),
   replyToEmail: (emailId, data) => api.post(`/emails/${emailId}/reply`, data),
   getSentEmails: (params) => api.get('/emails/sent', { params }),
+  autoClassifyEmails: () => api.post('/emails/auto-classify'),
+  retryClassification: () => api.post('/emails/classify-retry'),
 };
 
 export const microsoftAPI = {

@@ -76,29 +76,28 @@ class OpenAIService:
         
         current_date = datetime.now().strftime('%Y-%m-%d')
         
-        base_prompt = f"""
-Eres un asistente inteligente especializado en clasificar correos electrónicos para Maritza Silva, 
-Directora de la carrera ICIF en Universidad San Sebastián, Chile.
+        # Smart content truncation - keep important parts
+        content = email_data.get('body_preview', '')
+        if len(content) > 400:
+            # Keep first 200 chars and last 200 chars for context
+            content = content[:200] + "..." + content[-200:]
+        
+        base_prompt = f"""Eres un asistente especializado en clasificar correos para Maritza Silva, Directora de ICIF en Universidad San Sebastián, Chile.
 
-CONTEXTO ACADÉMICO:
-- Directora de carrera universitaria
-- Gestiona estudiantes, profesores y personal administrativo
-- Debe responder a emergencias estudiantiles rápidamente
-- Fechas importantes: exámenes, entregas, reuniones académicas
-- Fecha actual: {current_date}
+CONTEXTO: Directora universitaria que gestiona estudiantes, profesores y personal. Debe responder emergencias rápidamente.
 
 NIVELES DE URGENCIA:
-1. URGENTE (próxima 1 hora): Emergencias médicas, accidentes estudiantiles, crisis de seguridad, situaciones que requieren acción INMEDIATA
-2. ALTA (próximas 3 horas): Problemas académicos graves, reuniones urgentes hoy, deadlines críticos, estudiantes en crisis
-3. MEDIA (hoy o próximos días): Solicitudes académicas con plazo definido, cambios de horario, coordinación con profesores, tareas administrativas que requieren seguimiento pero NO son emergencias
-4. BAJA (mañana o más): Información general, invitaciones futuras, documentación no urgente, consultas sin plazo específico
+1. URGENTE (1 hora): Emergencias médicas, accidentes, crisis de seguridad, acción INMEDIATA
+2. ALTA (3 horas): Problemas académicos graves, reuniones urgentes hoy, deadlines críticos
+3. MEDIA (hoy/próximos días): Solicitudes académicas con plazo, cambios de horario, coordinación
+4. BAJA (mañana+): Información general, invitaciones futuras, documentación no urgente
 
 PALABRAS CLAVE CRÍTICAS para URGENTE:
 - Emergencias: accidente, lesión, hospital, ambulancia, herido, sangre, desmayo, caída
 - Crisis: ayuda, socorro, crítico, grave, urgente, emergencia
 - Seguridad: peligro, amenaza, violencia, drogas, alcohol
 
-EJEMPLOS DE CLASIFICACIÓN:
+EJEMPLOS:
 - URGENTE: "Estudiante herido en laboratorio, necesita ambulancia"
 - ALTA: "Reunión urgente hoy a las 3pm para resolver problema académico"
 - MEDIA: "Solicitud cambio de horario con plazo viernes 20 septiembre"
@@ -113,7 +112,7 @@ Contenido: {email_data.get('body_preview', '')[:500]}
 INSTRUCCIONES:
 1. Analiza el contexto académico del remitente (estudiante/profesor/administración)
 2. Identifica palabras clave de urgencia y deadlines
-3. Considera la proximidad temporal de eventos mencionados
+3. Considera la proximidad temporal de eventos
 4. Evalúa el impacto en las responsabilidades de la directora
 
 Responde SOLO en formato JSON válido:
@@ -125,10 +124,61 @@ Responde SOLO en formato JSON válido:
     "email_type": "academico|administrativo|personal|emergencia",
     "requires_immediate_action": true/false,
     "suggested_deadline": "2024-01-15T14:00:00" // o null
-}}
-"""
+}}"""
         
         return base_prompt.strip()
+    
+    def _lightweight_classification(self, email_data: Dict) -> Dict:
+        """Lightweight classification using minimal tokens."""
+        
+        # Ultra-minimal prompt for basic classification
+        subject = email_data.get('subject', '')
+        content = email_data.get('body_preview', '')[:100]  # Only first 100 chars
+        
+        lightweight_prompt = f"""Clasifica urgencia para directora universitaria:
+
+Asunto: {subject}
+Contenido: {content}
+
+URGENTE: emergencias médicas, accidentes, crisis
+ALTA: reuniones urgentes hoy, deadlines críticos
+MEDIA: consultas académicas, coordinación
+BAJA: información general
+
+JSON:
+{{
+    "urgency_category": "urgent|high|medium|low",
+    "confidence_score": 0.8,
+    "reasoning": "Breve explicación",
+    "sender_type": "estudiante|profesor|administracion|externo",
+    "email_type": "academico|administrativo|personal|emergencia",
+    "requires_immediate_action": true/false
+}}"""
+        
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": lightweight_prompt}],
+                max_tokens=200,  # Reduced tokens
+                temperature=0.3
+            )
+            
+            result = response.choices[0].message.content.strip()
+            logger.info(f"Lightweight classification result: {result[:100]}...")
+            
+            # Parse JSON response
+            import json
+            classification = json.loads(result)
+            
+            # Add missing fields with defaults
+            classification.setdefault('suggested_deadline', None)
+            classification.setdefault('rate_limit_retry', False)
+            
+            return classification
+            
+        except Exception as e:
+            logger.error(f"Lightweight classification error: {str(e)}")
+            raise e
     
     def classify_email(self, email_data: Dict) -> Dict:
         """Classify a single email using OpenAI GPT-4."""
@@ -199,9 +249,35 @@ Responde SOLO en formato JSON válido:
                 return self._fallback_classification(email_data)
         
         except Exception as e:
-            logger.error(f"❌ OpenAI API error: {str(e)}")
-            logger.warning("Falling back to rule-based classification")
-            return self._fallback_classification(email_data)
+            error_str = str(e)
+            if "rate_limit" in error_str.lower() or "429" in error_str:
+                logger.warning(f"⚠️  OpenAI Rate limit reached: {error_str}")
+                # In production, we should retry after delay, not fallback
+                from flask import current_app
+                is_production = current_app.config.get('FLASK_ENV') == 'production'
+                
+                if is_production:
+                    logger.info("Production mode: Will retry classification later")
+                    # Set rate limit timestamp
+                    self._last_rate_limit = time.time()
+                    # Return a special status to indicate rate limit
+                    return {
+                        'urgency_category': 'medium',
+                        'confidence_score': 0.0,
+                        'reasoning': 'Rate limit reached - will retry later',
+                        'sender_type': 'externo',
+                        'email_type': 'academico',
+                        'requires_immediate_action': False,
+                        'suggested_deadline': None,
+                        'rate_limit_retry': True
+                    }
+                else:
+                    logger.info("Development mode: Falling back to rule-based classification")
+                    return self._fallback_classification(email_data)
+            else:
+                logger.error(f"❌ OpenAI API error: {error_str}")
+                logger.warning("Falling back to rule-based classification")
+                return self._fallback_classification(email_data)
     
     def _fallback_classification(self, email_data: Dict) -> Dict:
         """Fallback classification when OpenAI is unavailable."""
@@ -296,9 +372,12 @@ Responde SOLO en formato JSON válido:
                     classification = self.classify_email(email_data)
                     batch_results.append(classification)
                     
-                    # Small delay to avoid rate limiting
+                    # Adaptive delay based on environment
                     import time
-                    time.sleep(0.5)
+                    from flask import current_app
+                    is_production = current_app.config.get('FLASK_ENV') == 'production'
+                    delay = 10.0 if is_production else 5.0  # Ultra long delay to avoid rate limits
+                    time.sleep(delay)
                     
                 except Exception as e:
                     logger.error(f"Error classifying email: {str(e)}")
@@ -306,10 +385,13 @@ Responde SOLO en formato JSON válido:
             
             results.extend(batch_results)
             
-            # Longer delay between batches
+            # Adaptive delay between batches
             if i + batch_size < len(emails_data):
                 import time
-                time.sleep(2)
+                from flask import current_app
+                is_production = current_app.config.get('FLASK_ENV') == 'production'
+                delay = 30.0 if is_production else 15.0  # Ultra long delay to avoid rate limits
+                time.sleep(delay)
         
         logger.info(f"Completed batch classification of {len(emails_data)} emails")
         return results

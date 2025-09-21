@@ -43,7 +43,11 @@ class Config:
         'https://graph.microsoft.com/Mail.Send',
         'offline_access'
     ]
-    MICROSOFT_REDIRECT_URI = os.environ.get('MICROSOFT_REDIRECT_URI') or 'https://email-manager-ia-testing.vercel.app/auth/callback'
+    # Auto-detect redirect URI based on environment
+    if os.environ.get('FLASK_ENV') == 'production':
+        MICROSOFT_REDIRECT_URI = os.environ.get('MICROSOFT_REDIRECT_URI') or 'https://emailmanageriatesting.onrender.com/auth/callback'
+    else:
+        MICROSOFT_REDIRECT_URI = os.environ.get('MICROSOFT_REDIRECT_URI') or 'http://localhost:5178/auth/callback'
     
     # OpenAI Configuration
     OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')

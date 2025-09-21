@@ -149,6 +149,31 @@ const Dashboard = () => {
       const statusResponse = await emailAPI.syncEmailStatuses({ limit: 100 });
       console.log('Status sync completed:', statusResponse.data);
 
+      // Auto-classify pending emails
+      console.log('Checking for pending emails to classify...');
+      try {
+        const classifyResponse = await emailAPI.autoClassifyEmails();
+        console.log('Auto-classification completed:', classifyResponse.data);
+        if (classifyResponse.data.classified > 0) {
+          console.log(`✅ Auto-classified ${classifyResponse.data.classified} emails`);
+        } else {
+          console.log('ℹ️  No pending emails to classify');
+        }
+      } catch (classifyError) {
+        console.warn('Auto-classification failed:', classifyError);
+        // Continue without failing the entire load process
+      }
+
+      // Retry classification for any emails that hit rate limit (production only)
+      try {
+        const retryResponse = await emailAPI.retryClassification();
+        if (retryResponse.data.classified > 0) {
+          console.log(`🔄 Retry classified ${retryResponse.data.classified} emails`);
+        }
+      } catch (retryError) {
+        console.log('No emails need retry classification');
+      }
+
       // Load received emails
       console.log('Fetching emails...');
       const response = await emailAPI.getEmails();

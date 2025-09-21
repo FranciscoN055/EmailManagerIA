@@ -1284,6 +1284,224 @@ def get_openai_status():
             'error': 'Failed to get OpenAI status'
         }), 500
 
+@emails_bp.route('/openai-rate-limit', methods=['GET'])
+@jwt_required()
+def check_openai_rate_limit():
+    """Check OpenAI rate limit status."""
+    try:
+        from app.services.openai_service import OpenAIService
+        
+        openai_service = OpenAIService()
+        status = openai_service.get_status()
+        
+        # Add rate limit info
+        status['rate_limit_info'] = {
+            'free_tier_limit': '3 requests per minute',
+            'recommended_batch_size': 3,
+            'recommended_delay': '2 seconds between requests'
+        }
+        
+        return jsonify({
+            'success': True,
+            'openai_status': status,
+            'message': 'OpenAI rate limit status retrieved'
+        })
+    
+    except Exception as e:
+        logger.error(f"Error checking OpenAI rate limit: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to check OpenAI rate limit status'
+        }), 500
+
+@emails_bp.route('/classify-retry', methods=['POST'])
+@jwt_required()
+def retry_classification():
+    """Retry classification for emails that hit rate limit."""
+    try:
+        user_id = get_jwt_identity()
+        
+        # Get user's email accounts first
+        user_email_accounts = EmailAccount.query.filter_by(user_id=user_id).all()
+        account_ids = [account.id for account in user_email_accounts]
+        
+        if not account_ids:
+            return jsonify({
+                'success': True,
+                'message': 'No email accounts found',
+                'classified': 0
+            })
+        
+        # Get emails that need retry (those with rate_limit_retry flag)
+        retry_emails = Email.query.filter(
+            Email.email_account_id.in_(account_ids),
+            Email.processing_status == 'pending',
+            Email.ai_reasoning.like('%Rate limit reached%')
+        ).order_by(Email.received_at.desc()).limit(3).all()  # Only 3 at a time
+        
+        if not retry_emails:
+            return jsonify({
+                'success': True,
+                'message': 'No emails need retry classification',
+                'classified': 0
+            })
+        
+        # Prepare email data for OpenAI
+        emails_data = []
+        for email in retry_emails:
+            emails_data.append({
+                'email_id': str(email.id),
+                'subject': email.subject,
+                'sender_name': email.sender_name,
+                'sender_email': email.sender_email,
+                'body_preview': email.body_preview,
+                'received_at': email.received_at.isoformat()
+            })
+        
+        # Classify with OpenAI (very conservative)
+        openai_service = OpenAIService()
+        logger.info(f"Retrying classification for {len(emails_data)} emails")
+        
+        classifications = openai_service.classify_batch(emails_data, batch_size=1)  # One at a time
+        
+        # Update emails with classification results
+        classified_count = 0
+        for i, email in enumerate(retry_emails):
+            if i < len(classifications):
+                classification = classifications[i]
+                
+                # Skip if still rate limited
+                if classification.get('rate_limit_retry'):
+                    continue
+                
+                email.urgency_category = classification.get('urgency_category', 'medium')
+                email.priority_level = get_priority_from_urgency(email.urgency_category)
+                email.ai_confidence = classification.get('confidence_score', 0.0)
+                email.ai_reasoning = classification.get('reasoning', '')
+                email.processing_status = 'classified'
+                email.is_classified = True
+                email.classified_at = datetime.now()
+                email.classification_model = openai_service.model
+                
+                classified_count += 1
+                logger.info(f"Retry classified email {email.id} as {email.urgency_category}")
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Retry classified {classified_count} emails',
+            'classified': classified_count,
+            'total_retry': len(retry_emails)
+        })
+    
+    except Exception as e:
+        logger.error(f"Error in retry classification: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Retry classification failed'
+        }), 500
+
+@emails_bp.route('/auto-classify', methods=['POST'])
+@jwt_required()
+def auto_classify_emails():
+    """Automatically classify all pending emails when app opens."""
+    try:
+        user_id = get_jwt_identity()
+        logger.info(f"Starting auto-classification for user {user_id}")
+        
+        # Get user's email accounts first
+        user_email_accounts = EmailAccount.query.filter_by(user_id=user_id).all()
+        account_ids = [account.id for account in user_email_accounts]
+        
+        if not account_ids:
+            return jsonify({
+                'success': True,
+                'message': 'No email accounts found',
+                'classified': 0
+            })
+        
+        # Get pending emails (not classified yet) - Different limits for dev vs prod
+        from flask import current_app
+        is_production = current_app.config.get('FLASK_ENV') == 'production'
+        
+        # Emergency mode: ultra conservative limits
+        limit = 1 if is_production else 2  # Ultra conservative - 1 email at a time
+        pending_emails = Email.query.filter(
+            Email.email_account_id.in_(account_ids),
+            Email.processing_status == 'pending'
+        ).order_by(Email.received_at.desc()).limit(limit).all()
+        
+        if not pending_emails:
+            logger.info(f"No pending emails to classify for user {user_id}")
+            return jsonify({
+                'success': True,
+                'message': 'No pending emails to classify',
+                'classified': 0
+            })
+        
+        logger.info(f"Found {len(pending_emails)} pending emails to classify")
+        
+        # Prepare email data for OpenAI
+        emails_data = []
+        for email in pending_emails:
+            emails_data.append({
+                'email_id': str(email.id),
+                'subject': email.subject,
+                'sender_name': email.sender_name,
+                'sender_email': email.sender_email,
+                'body_preview': email.body_preview,
+                'received_at': email.received_at.isoformat()
+            })
+        
+        # Classify with OpenAI
+        openai_service = OpenAIService()
+        logger.info(f"Classifying {len(emails_data)} emails with OpenAI")
+        
+        # Different batch sizes for dev vs prod - ultra conservative
+        batch_size = 1  # Always 1 at a time to avoid rate limits
+        classifications = openai_service.classify_batch(emails_data, batch_size=batch_size)
+        
+        # Update emails with classification results
+        classified_count = 0
+        for i, email in enumerate(pending_emails):
+            if i < len(classifications):
+                classification = classifications[i]
+                
+                email.urgency_category = classification.get('urgency_category', 'medium')
+                email.priority_level = get_priority_from_urgency(email.urgency_category)
+                email.ai_confidence = classification.get('confidence_score', 0.0)
+                email.ai_reasoning = classification.get('reasoning', '')
+                email.processing_status = 'classified'
+                email.is_classified = True
+                email.classified_at = datetime.now()
+                email.classification_model = openai_service.model
+                
+                classified_count += 1
+                logger.info(f"Classified email {email.id} as {email.urgency_category}")
+        
+        db.session.commit()
+        
+        # Generate classification stats
+        classification_stats = openai_service.get_classification_stats(classifications)
+        
+        logger.info(f"Auto-classification completed: {classified_count} emails classified")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Auto-classified {classified_count} emails',
+            'classified': classified_count,
+            'total_pending': len(pending_emails),
+            'classification_stats': classification_stats
+        })
+    
+    except Exception as e:
+        logger.error(f"Error in auto-classification: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Auto-classification failed'
+        }), 500
+
 @emails_bp.route('/sent', methods=['GET'])
 @jwt_required()
 def get_sent_emails():
