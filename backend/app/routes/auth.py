@@ -68,8 +68,53 @@ def auth_callback():
         
         user_info = user_response.json()
         
+        # Create or update user in database
+        from app.models import User, EmailAccount
+        from app import db
+        
+        user_id = user_info.get('id')
+        user_email = user_info.get('mail') or user_info.get('userPrincipalName')
+        user_name = user_info.get('displayName', 'Usuario Microsoft')
+        
+        # Create or get user
+        user = User.query.filter_by(id=user_id).first()
+        if not user:
+            user = User(
+                id=user_id,
+                email=user_email,
+                name=user_name,
+                is_active=True
+            )
+            db.session.add(user)
+        
+        # Create or update Microsoft account
+        email_account = EmailAccount.query.filter_by(
+            user_id=user_id, 
+            provider='microsoft'
+        ).first()
+        
+        if not email_account:
+            email_account = EmailAccount(
+                user_id=user_id,
+                email_address=user_email,
+                display_name=user_name,
+                provider='microsoft',
+                account_type='personal',
+                access_token=access_token,
+                is_active=True,
+                sync_enabled=True
+            )
+            db.session.add(email_account)
+        else:
+            # Update existing account
+            email_account.access_token = access_token
+            email_account.is_active = True
+            email_account.sync_enabled = True
+        
+        db.session.commit()
+        
         # Create JWT token for our app
-        jwt_token = create_access_token(identity=user_info.get('id'))
+        jwt_token = create_access_token(identity=user_id)
         
         # Redirect to frontend callback with token
         frontend_url = os.environ.get('FRONTEND_URL', 'https://email-manager-ia.vercel.app')
