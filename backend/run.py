@@ -25,10 +25,16 @@ if __name__ == '__main__':
     print(f"Port: {port}")
     print(f"Debug mode: {debug}")
     
-    # Run the application
-    app.run(
-        host='0.0.0.0',
-        port=port,
-        debug=debug,
-        threaded=True
-    )
+    # Check if running in production (Render)
+    if os.environ.get('FLASK_ENV') == 'production':
+        # Use Gunicorn for production
+        import gunicorn.app.wsgiapp as wsgi
+        wsgi.WSGIApplication("%(prog)s [OPTIONS] [APP_MODULE]").run()
+    else:
+        # Use Flask dev server for development
+        app.run(
+            host='0.0.0.0',
+            port=port,
+            debug=debug,
+            threaded=True
+        )
