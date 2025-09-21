@@ -1033,7 +1033,7 @@ def classify_emails():
             })
         
         # Classify with OpenAI
-        ai_service = AIService()
+        gemini_service = GeminiOnlyService()
         logger.info(f"Classifying {len(emails)} emails with OpenAI")
         
         classifications = gemini_service.classify_batch(emails_data, batch_size=5)
@@ -1082,7 +1082,7 @@ def get_ai_status():
     try:
         from app.services.gemini_only_service import GeminiOnlyService
         
-        ai_service = AIService()
+        gemini_service = GeminiOnlyService()
         status = gemini_service.get_status()
         
         return jsonify({
@@ -1130,7 +1130,7 @@ def classify_single_email(email_id):
         }
         
         # Classify with OpenAI
-        ai_service = AIService()
+        gemini_service = GeminiOnlyService()
         classification = gemini_service.classify_email(email_data)
         
         # Update email
@@ -1212,7 +1212,7 @@ def get_classification_stats():
             })
         
         # Generate stats
-        ai_service = AIService()
+        gemini_service = GeminiOnlyService()
         stats = gemini_service.get_classification_stats(classifications)
         
         # Add timing stats
@@ -1243,7 +1243,7 @@ def get_classification_stats():
 def get_openai_status():
     """Get OpenAI service status and configuration."""
     try:
-        ai_service = AIService()
+        gemini_service = GeminiOnlyService()
         status = gemini_service.get_status()
         
         # Add some usage stats if available
@@ -1291,7 +1291,7 @@ def check_openai_rate_limit():
     try:
         from app.services.gemini_only_service import GeminiOnlyService
         
-        ai_service = AIService()
+        gemini_service = GeminiOnlyService()
         status = gemini_service.get_status()
         
         # Add rate limit info
@@ -1359,7 +1359,7 @@ def retry_classification():
             })
         
         # Classify with OpenAI (very conservative)
-        ai_service = AIService()
+        gemini_service = GeminiOnlyService()
         logger.info(f"Retrying classification for {len(emails_data)} emails")
         
         classifications = gemini_service.classify_batch(emails_data, batch_size=1)  # One at a time
@@ -1455,7 +1455,7 @@ def auto_classify_emails():
             })
         
         # Classify with OpenAI
-        ai_service = AIService()
+        gemini_service = GeminiOnlyService()
         logger.info(f"Classifying {len(emails_data)} emails with OpenAI")
         
         # Different batch sizes for dev vs prod - ultra conservative
