@@ -93,6 +93,10 @@ def create_app(config_name=None):
     app.register_blueprint(emails_bp, url_prefix='/api/emails')
     app.register_blueprint(microsoft_bp, url_prefix='/api/microsoft')
     
+    # Add direct auth callback route for Microsoft OAuth
+    from .routes.auth import auth_callback
+    app.add_url_rule('/auth/callback', 'auth_callback', auth_callback, methods=['GET', 'POST'])
+    
     # Error handlers
     @app.errorhandler(404)
     def not_found(error):
