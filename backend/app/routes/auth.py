@@ -82,10 +82,16 @@ def auth_callback():
             user = User(
                 id=user_id,
                 email=user_email,
-                name=user_name,
+                full_name=user_name,
+                microsoft_user_id=user_id,
                 is_active=True
             )
             db.session.add(user)
+        else:
+            # Update existing user
+            user.full_name = user_name
+            user.microsoft_user_id = user_id
+            user.is_active = True
         
         # Create or update Microsoft account
         email_account = EmailAccount.query.filter_by(
