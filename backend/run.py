@@ -28,10 +28,15 @@ if __name__ == '__main__':
     # Check if running in production (Render)
     if os.environ.get('FLASK_ENV') == 'production':
         # Use Gunicorn for production
-        import gunicorn.app.wsgiapp as wsgi
-        wsgi.WSGIApplication("%(prog)s [OPTIONS] [APP_MODULE]").run(
-            argv=['gunicorn', 'run:app', '--bind', '0.0.0.0:10000']
-        )
+        import subprocess
+        import sys
+        subprocess.run([
+            sys.executable, '-m', 'gunicorn', 
+            'run:app', 
+            '--bind', '0.0.0.0:10000',
+            '--workers', '2',
+            '--timeout', '120'
+        ])
     else:
         # Use Flask dev server for development
         app.run(
