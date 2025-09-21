@@ -20,6 +20,10 @@ class GeminiService:
         self.api_key = self.config.get('GEMINI_API_KEY')
         self.model_name = 'gemini-pro'
         
+        # Debug logging
+        logger.info(f"Gemini API key configured: {bool(self.api_key)}")
+        logger.info(f"Gemini API key value: {self.api_key[:10] if self.api_key else 'None'}...")
+        
         self.client = None
         if self.api_key and self.api_key != 'your-gemini-api-key-here':
             try:
