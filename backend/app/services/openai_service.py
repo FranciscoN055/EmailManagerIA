@@ -27,11 +27,16 @@ class OpenAIService:
         self.client = None
         if self.api_key and self.api_key != 'your-openai-api-key-here':
             try:
-                # Initialize OpenAI client with minimal configuration
+                # Initialize OpenAI client with explicit parameters only
+                import openai
+                logger.info(f"OpenAI version: {openai.__version__}")
+                
+                # Create client with only essential parameters
                 self.client = OpenAI(api_key=self.api_key)
                 logger.info("OpenAI client initialized successfully")
             except Exception as e:
                 logger.warning(f"Failed to initialize OpenAI client: {e}")
+                logger.warning(f"Error type: {type(e).__name__}")
                 self.client = None
         
         # Academic context patterns - REAL urgent situations
