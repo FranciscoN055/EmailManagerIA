@@ -75,6 +75,7 @@ def create_app(config_name=None):
         return {
             'status': 'ok',
             'environment': app.config.get('FLASK_ENV', 'unknown'),
+            'gemini_api_key': app.config.get('GEMINI_API_KEY', 'Not set'),
             'microsoft_config': {
                 'client_id': app.config.get('MICROSOFT_CLIENT_ID', 'Not set'),
                 'tenant_id': app.config.get('MICROSOFT_TENANT_ID', 'Not set'),
