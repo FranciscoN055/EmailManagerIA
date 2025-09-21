@@ -202,14 +202,14 @@ def sync_emails():
                             email.processing_status = 'completed'
                             email.is_classified = True
                             email.classified_at = datetime.now()
-                            email.classification_model = openai_service.model
+                            email.classification_model = ai_service.model
                             classified_count += 1
                 
                 # Commit classification updates
                 db.session.commit()
                 
                 # Generate classification stats
-                classification_results = openai_service.get_classification_stats(classifications)
+                classification_results = ai_service.get_classification_stats(classifications)
                 
                 logger.info(f"Successfully classified {classified_count} emails")
                 
@@ -1033,10 +1033,10 @@ def classify_emails():
             })
         
         # Classify with OpenAI
-        openai_service = OpenAIService()
+        ai_service = AIService()
         logger.info(f"Classifying {len(emails)} emails with OpenAI")
         
-        classifications = openai_service.classify_batch(emails_data, batch_size=5)
+        classifications = ai_service.classify_batch(emails_data, batch_size=5)
         
         # Update emails with classification results
         classified_count = 0
@@ -1051,14 +1051,14 @@ def classify_emails():
                 email.processing_status = 'classified'
                 email.is_classified = True
                 email.classified_at = datetime.now()
-                email.classification_model = openai_service.model
+                email.classification_model = ai_service.model
                 
                 classified_count += 1
         
         db.session.commit()
         
         # Generate classification stats
-        classification_stats = openai_service.get_classification_stats(classifications)
+        classification_stats = ai_service.get_classification_stats(classifications)
         
         return jsonify({
             'success': True,
@@ -1082,8 +1082,8 @@ def get_ai_status():
     try:
         from app.services.ai_service import AIService
         
-        openai_service = OpenAIService()
-        status = openai_service.get_status()
+        ai_service = AIService()
+        status = ai_service.get_status()
         
         return jsonify({
             'success': True,
@@ -1130,8 +1130,8 @@ def classify_single_email(email_id):
         }
         
         # Classify with OpenAI
-        openai_service = OpenAIService()
-        classification = openai_service.classify_email(email_data)
+        ai_service = AIService()
+        classification = ai_service.classify_email(email_data)
         
         # Update email
         email.urgency_category = classification.get('urgency_category', 'medium')
@@ -1141,12 +1141,12 @@ def classify_single_email(email_id):
         email.processing_status = 'classified'
         email.is_classified = True
         email.classified_at = datetime.now()
-        email.classification_model = openai_service.model
+        email.classification_model = ai_service.model
         
         db.session.commit()
         
         # Get response priority suggestion
-        priority_suggestion = openai_service.suggest_response_priority(classification)
+        priority_suggestion = ai_service.suggest_response_priority(classification)
         
         return jsonify({
             'success': True,
@@ -1212,8 +1212,8 @@ def get_classification_stats():
             })
         
         # Generate stats
-        openai_service = OpenAIService()
-        stats = openai_service.get_classification_stats(classifications)
+        ai_service = AIService()
+        stats = ai_service.get_classification_stats(classifications)
         
         # Add timing stats
         recent_emails = Email.query.filter(
@@ -1243,8 +1243,8 @@ def get_classification_stats():
 def get_openai_status():
     """Get OpenAI service status and configuration."""
     try:
-        openai_service = OpenAIService()
-        status = openai_service.get_status()
+        ai_service = AIService()
+        status = ai_service.get_status()
         
         # Add some usage stats if available
         user_id = get_jwt_identity()
@@ -1291,8 +1291,8 @@ def check_openai_rate_limit():
     try:
         from app.services.ai_service import AIService
         
-        openai_service = OpenAIService()
-        status = openai_service.get_status()
+        ai_service = AIService()
+        status = ai_service.get_status()
         
         # Add rate limit info
         status['rate_limit_info'] = {
@@ -1359,10 +1359,10 @@ def retry_classification():
             })
         
         # Classify with OpenAI (very conservative)
-        openai_service = OpenAIService()
+        ai_service = AIService()
         logger.info(f"Retrying classification for {len(emails_data)} emails")
         
-        classifications = openai_service.classify_batch(emails_data, batch_size=1)  # One at a time
+        classifications = ai_service.classify_batch(emails_data, batch_size=1)  # One at a time
         
         # Update emails with classification results
         classified_count = 0
@@ -1381,7 +1381,7 @@ def retry_classification():
                 email.processing_status = 'classified'
                 email.is_classified = True
                 email.classified_at = datetime.now()
-                email.classification_model = openai_service.model
+                email.classification_model = ai_service.model
                 
                 classified_count += 1
                 logger.info(f"Retry classified email {email.id} as {email.urgency_category}")
@@ -1455,12 +1455,12 @@ def auto_classify_emails():
             })
         
         # Classify with OpenAI
-        openai_service = OpenAIService()
+        ai_service = AIService()
         logger.info(f"Classifying {len(emails_data)} emails with OpenAI")
         
         # Different batch sizes for dev vs prod - ultra conservative
         batch_size = 1  # Always 1 at a time to avoid rate limits
-        classifications = openai_service.classify_batch(emails_data, batch_size=batch_size)
+        classifications = ai_service.classify_batch(emails_data, batch_size=batch_size)
         
         # Update emails with classification results
         classified_count = 0
@@ -1475,7 +1475,7 @@ def auto_classify_emails():
                 email.processing_status = 'classified'
                 email.is_classified = True
                 email.classified_at = datetime.now()
-                email.classification_model = openai_service.model
+                email.classification_model = ai_service.model
                 
                 classified_count += 1
                 logger.info(f"Classified email {email.id} as {email.urgency_category}")
@@ -1483,7 +1483,7 @@ def auto_classify_emails():
         db.session.commit()
         
         # Generate classification stats
-        classification_stats = openai_service.get_classification_stats(classifications)
+        classification_stats = ai_service.get_classification_stats(classifications)
         
         logger.info(f"Auto-classification completed: {classified_count} emails classified")
         
