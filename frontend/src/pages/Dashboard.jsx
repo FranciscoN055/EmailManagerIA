@@ -91,7 +91,7 @@ const Dashboard = () => {
     const token = localStorage.getItem('token');
     if (!token) return;
 
-    fetch('http://localhost:5000/api/microsoft/profile', {
+    fetch(`${import.meta.env.VITE_API_URL || (window.location.hostname === 'localhost' ? 'http://localhost:5000/api' : 'https://emailmanageria.onrender.com/api')}/microsoft/profile`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -104,7 +104,7 @@ const Dashboard = () => {
 
           // Si hay foto, la pedimos
           if (data.has_photo) {
-            fetch('http://localhost:5000/api/microsoft/profile/photo', {
+            fetch(`${import.meta.env.VITE_API_URL || (window.location.hostname === 'localhost' ? 'http://localhost:5000/api' : 'https://emailmanageria.onrender.com/api')}/microsoft/profile/photo`, {
               headers: { Authorization: `Bearer ${token}` },
             })
               .then(response => {
@@ -360,7 +360,7 @@ const Dashboard = () => {
     
     try {
       const token = localStorage.getItem('token'); // Usar 'token' en lugar de 'access_token'
-      const response = await fetch(`http://localhost:5000/api/emails/${emailId}/update-urgency`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || (window.location.hostname === 'localhost' ? 'http://localhost:5000/api' : 'https://emailmanageria.onrender.com/api')}/emails/${emailId}/update-urgency`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
