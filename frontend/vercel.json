@@ -9,6 +9,6 @@
     }
   ],
   "env": {
-    "VITE_API_URL": "https://email-manager-backend-nuevo.onrender.com/api"
+    "VITE_API_URL": "https://emailmanageria.onrender.com/api"
   }
 }

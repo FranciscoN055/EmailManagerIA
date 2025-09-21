@@ -15,7 +15,7 @@ export default defineConfig(({ mode }) => {
       // Define environment variables at build time
       'import.meta.env.VITE_API_URL': JSON.stringify(
         process.env.VITE_API_URL || 
-        (isDevelopment ? 'http://localhost:5000/api' : 'https://emailmanageriatesting.onrender.com/api')
+        (isDevelopment ? 'http://localhost:5000/api' : 'https://emailmanageria.onrender.com/api')
       )
     }
   }
