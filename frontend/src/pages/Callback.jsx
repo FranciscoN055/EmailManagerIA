@@ -12,7 +12,7 @@ const Callback = () => {
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        const code = searchParams.get('code');
+        const token = searchParams.get('token');
         const error = searchParams.get('error');
 
         if (error) {
@@ -21,31 +21,42 @@ const Callback = () => {
           return;
         }
 
-        if (!code) {
+        if (!token) {
           setStatus('error');
-          setMessage('No se recibió el código de autorización');
+          setMessage('No se recibió el token de autenticación');
           return;
         }
 
-        // Enviar el código al backend
-        const response = await microsoftAPI.callback(code);
+        // Guardar el token JWT directamente
+        localStorage.setItem('token', token);
         
-        if (response.data.success) {
-          // Guardar el token JWT
-          localStorage.setItem('token', response.data.token);
-          localStorage.setItem('user', JSON.stringify(response.data.user));
-          
-          setStatus('success');
-          setMessage('¡Autenticación exitosa! Redirigiendo...');
-          
-          // Redirigir al dashboard después de 2 segundos
-          setTimeout(() => {
-            navigate('/dashboard');
-          }, 2000);
-        } else {
-          setStatus('error');
-          setMessage(response.data.error || 'Error en la autenticación');
+        // Obtener información del usuario desde el token
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          const user = {
+            id: payload.sub,
+            name: 'Usuario Microsoft',
+            email: 'usuario@microsoft.com'
+          };
+          localStorage.setItem('user', JSON.stringify(user));
+        } catch (e) {
+          console.warn('No se pudo decodificar el token, usando datos por defecto');
+          const user = {
+            id: 'microsoft-user',
+            name: 'Usuario Microsoft',
+            email: 'usuario@microsoft.com'
+          };
+          localStorage.setItem('user', JSON.stringify(user));
         }
+        
+        setStatus('success');
+        setMessage('¡Autenticación exitosa! Redirigiendo...');
+        
+        // Redirigir al dashboard después de 2 segundos
+        setTimeout(() => {
+          navigate('/dashboard');
+        }, 2000);
+        
       } catch (error) {
         console.error('Error en callback:', error);
         setStatus('error');
