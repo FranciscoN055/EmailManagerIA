@@ -52,6 +52,12 @@ class Config:
     OPENAI_MAX_TOKENS = int(os.environ.get('OPENAI_MAX_TOKENS', 1000))
     OPENAI_TEMPERATURE = float(os.environ.get('OPENAI_TEMPERATURE', 0.3))
     
+    # Gemini Configuration
+    GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY') or 'your-gemini-api-key-here'
+    GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-1.5-flash')
+    GEMINI_MAX_TOKENS = int(os.environ.get('GEMINI_MAX_TOKENS', 1000))
+    GEMINI_TEMPERATURE = float(os.environ.get('GEMINI_TEMPERATURE', 0.3))
+    
     # Redis Configuration (for Celery)
     REDIS_URL = os.environ.get('REDIS_URL') or 'redis://localhost:6379/0'
     CELERY_BROKER_URL = REDIS_URL
