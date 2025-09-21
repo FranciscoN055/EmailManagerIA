@@ -29,7 +29,9 @@ if __name__ == '__main__':
     if os.environ.get('FLASK_ENV') == 'production':
         # Use Gunicorn for production
         import gunicorn.app.wsgiapp as wsgi
-        wsgi.WSGIApplication("%(prog)s [OPTIONS] [APP_MODULE]").run()
+        wsgi.WSGIApplication("%(prog)s [OPTIONS] [APP_MODULE]").run(
+            argv=['gunicorn', 'run:app', '--bind', '0.0.0.0:10000']
+        )
     else:
         # Use Flask dev server for development
         app.run(
