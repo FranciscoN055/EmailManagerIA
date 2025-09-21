@@ -71,9 +71,9 @@ def auth_callback():
         # Create JWT token for our app
         jwt_token = create_access_token(identity=user_info.get('id'))
         
-        # Redirect to frontend with token
+        # Redirect to frontend callback with token
         frontend_url = os.environ.get('FRONTEND_URL', 'https://email-manager-ia.vercel.app')
-        return redirect(f"{frontend_url}?token={jwt_token}")
+        return redirect(f"{frontend_url}/auth/callback?token={jwt_token}")
         
     except Exception as e:
         return jsonify({
